@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
+import android.text.TextPaint
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.View
@@ -216,7 +217,7 @@ class DayWidget : AppWidgetProvider() {
                 c.drawLine(left, y, W - 8f, y, line)
                 if (h < 24) c.drawText("%02d".format(h), 10f, y + 8f, gray)
             }
-            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 25f }
+            val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 25f }
             val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC1E1E1E.toInt(); textSize = 22f }
             evs.forEach { e ->
                 val y0 = top + ((e.st - ds) / 3600000f - startH) * pxH
