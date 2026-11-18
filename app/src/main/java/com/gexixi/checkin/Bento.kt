@@ -175,7 +175,7 @@ fun BentoPage(header: @Composable () -> Unit, content: @Composable (cell: Dp) ->
         ) {
             header()
             content(cell)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(104.dp))   // 给悬浮的底栏留位置
         }
     }
 }

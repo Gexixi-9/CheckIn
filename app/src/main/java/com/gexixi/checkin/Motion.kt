@@ -178,7 +178,10 @@ fun Modifier.magnetic(): Modifier {
 
 // ---------------- 兑换按钮：点击缩放到 1.3 再弹回（刚度300 阻尼10），周围散开 8 个小圆点，+1 向上滚动 ----------------
 @Composable
-fun RedeemButton(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun RedeemButton(
+    label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier,
+    accent: Color = Color(0xFFE2CC93)
+) {
     val scale = remember { Animatable(1f) }
     val burst = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -192,7 +195,7 @@ fun RedeemButton(label: String, enabled: Boolean, onClick: () -> Unit, modifier:
                 for (i in 0 until 8) {
                     val ang = (i * 45f) * (Math.PI.toFloat() / 180f)
                     drawCircle(
-                        C.star.copy(alpha = 1f - b),
+                        accent.copy(alpha = 1f - b),
                         radius = 5.dp.toPx() * (1f - b * 0.4f),
                         center = Offset(cx + cos(ang) * dist, cy + sin(ang) * dist)
                     )
@@ -203,7 +206,7 @@ fun RedeemButton(label: String, enabled: Boolean, onClick: () -> Unit, modifier:
             Modifier
                 .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
                 .clip(RoundedCornerShape(50))
-                .background(if (enabled) C.gold else Color(0x55FFFFFF))
+                .background(if (enabled) accent else Color(0x33FFFFFF))
                 .clickable(enabled = enabled) {
                     onClick()
                     scope.launch { scale.animateTo(1.3f, tween(90)); scale.animateTo(1f, springF(300f, 10f)) }
@@ -212,10 +215,10 @@ fun RedeemButton(label: String, enabled: Boolean, onClick: () -> Unit, modifier:
                 .padding(horizontal = 26.dp, vertical = 14.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(label, color = if (enabled) Color(0xFF2A1D00) else Color(0xAAFFFFFF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = if (enabled) Color(0xFF2A2415) else Color(0x88FFFFFF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
         Text(
-            "+1", color = C.gold, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+            "+1", color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.graphicsLayer {
                 translationY = -64.dp.toPx() * burst.value
                 alpha = if (burst.value > 0f && burst.value < 1f) 1f - burst.value else 0f

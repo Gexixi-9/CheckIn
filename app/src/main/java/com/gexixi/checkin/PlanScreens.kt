@@ -32,6 +32,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -72,7 +73,7 @@ fun PlanPage(onSettings: () -> Unit) {
     val visible = Repo.visibleTasks()
     var creating by remember { mutableStateOf(false) }
     var showAi by remember { mutableStateOf(false) }
-    val shopColor by animateColorAsState(if (d.shopOpen) C.red else Color.White, tween(280), label = "shop")
+    val shopColor by animateColorAsState(if (d.shopOpen) SHOP_BG_TOP else Color.White, tween(280), label = "shop")
     val shopFg = if (d.shopOpen) Color.White else C.ink
 
     BentoPage(header = {
@@ -133,7 +134,7 @@ fun PlanPage(onSettings: () -> Unit) {
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("商城", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = shopFg)
-                        ElasticSwitch(d.shopOpen, { Repo.setShopOpen(it) }, onColor = C.ink)
+                        ElasticSwitch(d.shopOpen, { Repo.setShopOpen(it) }, onColor = Color(0xFF8E9BFF))
                     }
                     Spacer(Modifier.weight(1f))
                     ChestIcon(34.dp)
@@ -141,7 +142,7 @@ fun PlanPage(onSettings: () -> Unit) {
                     Text(if (d.shopOpen) "点开逛逛" else "已关闭", fontSize = 13.sp, color = shopFg)
                 }
             }
-            Bento(Modifier.size(cell), color = soft(1, 1f), title = "金币", detail = { CoinLogScreen() }) {
+            Bento(Modifier.size(cell), color = soft(10, 0.3f), title = "金币", detail = { CoinLogScreen() }) {
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Text("金币", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.ink)
                     Spacer(Modifier.weight(1f))
@@ -181,7 +182,7 @@ fun PlanPage(onSettings: () -> Unit) {
             }
         }
         BentoRow {
-            Bento(Modifier.size(cell), color = soft(6, 0.25f), title = "待办", detail = { TodoScreen() }) {
+            Bento(Modifier.size(cell), color = soft(4, 0.4f), title = "待办", detail = { TodoScreen() }) {
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Text("待办", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.ink)
                     Spacer(Modifier.weight(1f))
@@ -190,7 +191,7 @@ fun PlanPage(onSettings: () -> Unit) {
                 }
             }
             // 启动状态：压力 × 能量 四象限
-            Bento(Modifier.size(cell), color = soft(8, 0.3f), title = "启动状态", detail = { StateScreen() }) {
+            Bento(Modifier.size(cell), color = soft(2, 0.4f), title = "启动状态", detail = { StateScreen() }) {
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Text("启动状态", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.ink)
                     Spacer(Modifier.weight(1f))
@@ -223,7 +224,12 @@ fun PlanPage(onSettings: () -> Unit) {
             Bento(Modifier.size(cell), color = soft(9, 0.35f), onClick = { showAi = true }) {
                 Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Box(Modifier.magnetic().size(64.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                        Text("✨", fontSize = 30.sp)
+                        Image(
+                            painter = painterResource(R.drawable.ic_android),
+                            contentDescription = "Android",
+                            modifier = Modifier.size(38.dp),
+                            contentScale = ContentScale.Fit
+                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("AI 拆分", color = C.ink, fontWeight = FontWeight.Medium)

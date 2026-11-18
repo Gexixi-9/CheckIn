@@ -380,6 +380,9 @@ object Repo {
                 File(app.filesDir, "notes").walkTopDown().filter { it.isFile }.forEach {
                     add(it, "notes/" + it.relativeTo(File(app.filesDir, "notes")).path)
                 }
+                File(app.filesDir, "wishes").walkTopDown().filter { it.isFile }.forEach {
+                    add(it, "wishes/" + it.relativeTo(File(app.filesDir, "wishes")).path)
+                }
                 app.filesDir.listFiles()?.filter { it.isFile && it.name.startsWith("wish_") }?.forEach { add(it, "wishes/" + it.name) }
             }
         }

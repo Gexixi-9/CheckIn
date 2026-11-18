@@ -65,6 +65,7 @@ data class Wish(
     val cost: Int = 0,
     val stars: Int = 3,
     val photo: String = "",
+    val emoji: String = "",       // 没有图片时，展示柜圆圈里放的表情
     val kind: Int = 0,            // 0 自建商品（花金币兑换） 1 任务宝箱（完成任务直接领取）
     val status: Int = 0,          // 0 进行中/待领取  1 已实现/已领取
     val doneDate: String = "",

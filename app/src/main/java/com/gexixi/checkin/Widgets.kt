@@ -171,12 +171,25 @@ class DayWidget : AppWidgetProvider() {
             val d = Repo.data
             val date = LocalDate.now().plusDays(d.sumOffset.toLong())
             val rv = RemoteViews(ctx.packageName, R.layout.widget_day)
-            rv.setImageViewBitmap(R.id.day_img, bitmap(d, date))
+            val bmp = try {
+                bitmap(d, date)
+            } catch (e: Throwable) {
+                errorBitmap("每日日历画不出来：" + (e.message ?: e.javaClass.simpleName))
+            }
+            rv.setImageViewBitmap(R.id.day_img, bmp)
             rv.setOnClickPendingIntent(R.id.day_img, Widgets.openApp(ctx))
             rv.setOnClickPendingIntent(R.id.day_prev, Widgets.pi(ctx, DayWidget::class.java, ACTION_PREV))
             rv.setOnClickPendingIntent(R.id.day_next, Widgets.pi(ctx, DayWidget::class.java, ACTION_NEXT))
             rv.setOnClickPendingIntent(R.id.day_title, Widgets.pi(ctx, DayWidget::class.java, ACTION_TODAY))
             return rv
+        }
+
+        private fun errorBitmap(msg: String): Bitmap {
+            val b = Bitmap.createBitmap(600, 300, Bitmap.Config.ARGB_8888)
+            val c = Canvas(b)
+            val p = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 28f }
+            c.drawText(TextUtils.ellipsize(msg, p, 560f, TextUtils.TruncateAt.END).toString(), 20f, 150f, p)
+            return b
         }
 
         fun bitmap(d: Data, date: LocalDate): Bitmap {

@@ -9,7 +9,22 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.font.FontWeight
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,16 +97,18 @@ fun App() {
     MaterialTheme(colorScheme = lightColorScheme(primary = C.red, background = C.paper, surface = C.paper)) {
         CompositionLocalProvider(LocalBento provides host, LocalPointer provides pointer) {
             Box(Modifier.fillMaxSize().background(C.paper).trackPointer(pointer)) {
-                Column(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        when (screen) {
-                            0 -> RecordPage(onSettings = { lastTab = 0; screen = 2 })
-                            1 -> PlanPage(onSettings = { lastTab = 1; screen = 2 })
-                            else -> SettingsPage(onBack = { screen = lastTab })
-                        }
+                Box(Modifier.fillMaxSize()) {
+                    when (screen) {
+                        0 -> RecordPage(onSettings = { lastTab = 0; screen = 2 })
+                        1 -> PlanPage(onSettings = { lastTab = 1; screen = 2 })
+                        else -> SettingsPage(onBack = { screen = lastTab })
                     }
-                    BottomBar(screen) { screen = it }
                 }
+                // 悬浮的玻璃底栏：盖在内容上面，展开的卡片会再盖住它
+                GlassBar(
+                    screen, { screen = it },
+                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 14.dp)
+                )
                 BentoOverlay(host)
             }
             val sid = Repo.settleId
@@ -106,26 +123,60 @@ fun App() {
     }
 }
 
-/** 底栏只有两个：记录 / 规划。按下缩小并减弱阴影，松手弹簧回弹 */
+/**
+ * 悬浮玻璃底栏（参照小米文件管理器）：半透明圆角胶囊，里面两个入口，
+ * 选中的那块浅灰底会用弹簧滑过去（带一点过冲和拉伸），按下时图标整体回弹。
+ */
 @Composable
-fun BottomBar(screen: Int, onPick: (Int) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(Color.White).navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
+fun GlassBar(screen: Int, onPick: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val itemW = 96.dp
+    val idx by animateFloatAsState(if (screen in 0..1) screen.toFloat() else 0f, springF(380f, 20f), label = "barIdx")
+    val show by animateFloatAsState(if (screen in 0..1) 1f else 0f, tween(220), label = "barShow")
+    val mid = (4f * idx * (1f - idx)).coerceIn(0f, 1f)
+    val shape = RoundedCornerShape(34.dp)
+    Box(
+        modifier
+            .clip(shape)
+            .background(Brush.verticalGradient(listOf(Color(0xEBFFFFFF), Color(0xB8FFFFFF))))
+            .border(1.dp, Color(0xCCFFFFFF), shape)
+            .padding(5.dp)
     ) {
-        listOf("⏱️" to "记录", "🎯" to "规划").forEachIndexed { i, (e, n) ->
-            val sel = screen == i
-            Column(
-                Modifier
-                    .bounceClick(elevation = 6.dp, shape = RoundedCornerShape(20.dp)) { onPick(i) }
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (sel) Color(0xFFE6E0F5) else Color.Transparent)
-                    .padding(horizontal = 40.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(e, fontSize = 22.sp)
-                Text(n, fontSize = 12.sp, color = if (sel) C.ink else C.gray)
+        Box(
+            Modifier
+                .offset { IntOffset((idx * itemW.toPx()).roundToInt(), 0) }
+                .size(itemW, 54.dp)
+                .graphicsLayer { alpha = show; scaleX = 1f + 0.22f * mid }
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0x1F000000))
+        )
+        Row {
+            listOf("记录", "规划").forEachIndexed { i, n ->
+                Column(
+                    Modifier.size(itemW, 54.dp).bounceClick { onPick(i) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    BarIcon(i)
+                    Spacer(Modifier.height(3.dp))
+                    Text(n, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = C.ink)
+                }
             }
+        }
+    }
+}
+
+/** 实心线条小图标：0 = 钟（记录），1 = 靶心（规划） */
+@Composable
+private fun BarIcon(kind: Int) {
+    Canvas(Modifier.size(22.dp)) {
+        val w = this.size.width
+        if (kind == 0) {
+            drawCircle(C.ink, w / 2f)
+            drawLine(Color.White, Offset(w / 2f, w / 2f), Offset(w / 2f, w * 0.22f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+            drawLine(Color.White, Offset(w / 2f, w / 2f), Offset(w * 0.72f, w * 0.62f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+        } else {
+            drawCircle(C.ink, w / 2f - w * 0.06f, style = Stroke(w * 0.12f))
+            drawCircle(C.ink, w * 0.2f)
         }
     }
 }
