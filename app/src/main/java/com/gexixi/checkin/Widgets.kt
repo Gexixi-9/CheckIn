@@ -8,11 +8,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
+import android.text.TextUtils
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -25,8 +25,8 @@ object Widgets {
             mgr.getAppWidgetIds(ComponentName(ctx, TagWidget::class.java)).let {
                 if (it.isNotEmpty()) mgr.updateAppWidget(it, TagWidget.build(ctx))
             }
-            mgr.getAppWidgetIds(ComponentName(ctx, SummaryWidget::class.java)).let {
-                if (it.isNotEmpty()) mgr.updateAppWidget(it, SummaryWidget.build(ctx))
+            mgr.getAppWidgetIds(ComponentName(ctx, DayWidget::class.java)).let {
+                if (it.isNotEmpty()) mgr.updateAppWidget(it, DayWidget.build(ctx))
             }
             mgr.getAppWidgetIds(ComponentName(ctx, TaskWidget::class.java)).let {
                 if (it.isNotEmpty()) mgr.updateAppWidget(it, TaskWidget.build(ctx))
@@ -39,6 +39,11 @@ object Widgets {
         extras.forEach { i.putExtra(it.first, it.second) }
         val req = (action + extras.joinToString("|") { it.second }).hashCode()
         return PendingIntent.getBroadcast(ctx, req, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    fun settlePi(ctx: Context, taskId: String): PendingIntent {
+        val i = Intent(ctx, MainActivity::class.java).putExtra("settle", taskId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(ctx, ("settle" + taskId).hashCode(), i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     fun openApp(ctx: Context): PendingIntent =
@@ -136,8 +141,11 @@ class TagWidget : AppWidgetProvider() {
     }
 }
 
-/** 总结小组件：左边按小时的色条（上午/下午），右边圆环 + 各项目时长，可往前翻天。全部本地计算，不联网。 */
-class SummaryWidget : AppWidgetProvider() {
+/**
+ * 每日日历小组件（替代原来的今日总结）：把当天的时间轴画成一张图，色块、所思所感、照片都在上面；
+ * 同时发生的左右错开，和 App 里的日历是同一套算法。顶部可以往前后翻天，点日期回到今天，点图片打开 App。
+ */
+class DayWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, mgr: AppWidgetManager, ids: IntArray) {
         Repo.init(context)
         ids.forEach { mgr.updateAppWidget(it, build(context)) }
@@ -149,126 +157,113 @@ class SummaryWidget : AppWidgetProvider() {
         when (intent.action) {
             ACTION_PREV -> Repo.shiftSummary(-1)
             ACTION_NEXT -> Repo.shiftSummary(1)
+            ACTION_TODAY -> Repo.resetSummary()
         }
     }
 
     companion object {
-        const val ACTION_PREV = "com.gexixi.checkin.SUM_PREV"
-        const val ACTION_NEXT = "com.gexixi.checkin.SUM_NEXT"
+        const val ACTION_PREV = "com.gexixi.checkin.DAY_PREV"
+        const val ACTION_NEXT = "com.gexixi.checkin.DAY_NEXT"
+        const val ACTION_TODAY = "com.gexixi.checkin.DAY_TODAY"
 
         fun build(ctx: Context): RemoteViews {
             val d = Repo.data
             val date = LocalDate.now().plusDays(d.sumOffset.toLong())
-            val rv = RemoteViews(ctx.packageName, R.layout.widget_summary)
-            rv.setImageViewBitmap(R.id.sum_img, bitmap(d, date))
-            rv.setOnClickPendingIntent(R.id.sum_prev, Widgets.pi(ctx, SummaryWidget::class.java, ACTION_PREV))
-            rv.setOnClickPendingIntent(R.id.sum_next, Widgets.pi(ctx, SummaryWidget::class.java, ACTION_NEXT))
+            val rv = RemoteViews(ctx.packageName, R.layout.widget_day)
+            rv.setImageViewBitmap(R.id.day_img, bitmap(d, date))
+            rv.setOnClickPendingIntent(R.id.day_img, Widgets.openApp(ctx))
+            rv.setOnClickPendingIntent(R.id.day_prev, Widgets.pi(ctx, DayWidget::class.java, ACTION_PREV))
+            rv.setOnClickPendingIntent(R.id.day_next, Widgets.pi(ctx, DayWidget::class.java, ACTION_NEXT))
+            rv.setOnClickPendingIntent(R.id.day_title, Widgets.pi(ctx, DayWidget::class.java, ACTION_TODAY))
             return rv
         }
 
-        private fun fmtDur(min: Long): String = if (min >= 60) "" + (min / 60) + "h " + (min % 60) + "m" else "" + min + "m"
-
-        /** 把一组 [start,end] 合并后求总分钟 */
-        private fun unionMin(list: List<Pair<Long, Long>>): Long {
-            var total = 0L
-            var curS = -1L
-            var curE = -1L
-            for ((s, e) in list.sortedBy { it.first }) {
-                if (curS < 0) { curS = s; curE = e }
-                else if (s <= curE) curE = maxOf(curE, e)
-                else { total += curE - curS; curS = s; curE = e }
-            }
-            if (curS >= 0) total += curE - curS
-            return total / 60000
-        }
-
         fun bitmap(d: Data, date: LocalDate): Bitmap {
-            val W = 880
-            val H = 400
+            val W = 900
+            val H = 1100
             val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
             val ds = Repo.dayStart(date)
-            val de = ds + 86400000L
             val now = System.currentTimeMillis()
-            // 当天每条记录（裁到当天范围）
-            data class Seg(val tag: Tag, val s: Long, val e: Long)
-            val segs = d.sessions.mapNotNull { s ->
-                val tag = d.tags.firstOrNull { it.id == s.tagId } ?: return@mapNotNull null
-                val st = maxOf(s.start, ds)
-                val en = minOf(s.end ?: now, de)
-                if (en > st) Seg(tag, st, en) else null
-            }
-            val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 26f; typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER }
-            val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE4E4E0.toInt() }
+            val evs = dayEvents(d, date, now)
+            val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 30f; typeface = Typeface.DEFAULT_BOLD }
+            val gray = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 22f }
             val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+            val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE4E4DE.toInt(); strokeWidth = 2f }
 
-            // ---- 左：上午 / 下午 按小时的色条 ----
-            c.drawText("上午", 110f, 38f, ink)
-            c.drawText("下午", 330f, 38f, ink)
-            for (r in 0 until 12) {
-                val y = 56f + r * 24f
-                ink.textSize = 20f
-                c.drawText(if (r == 0) "0/12" else r.toString(), 220f, y + 15f, ink)
-                for (half in 0..1) {
-                    val hour = r + half * 12
-                    val bx = if (half == 0) 30f else 250f
-                    val bw = 160f
-                    c.drawRoundRect(RectF(bx, y, bx + bw, y + 17f), 8f, 8f, soft)
-                    val hs = ds + hour * 3600000L
-                    val he = hs + 3600000L
-                    segs.filter { it.e > hs && it.s < he }.forEach { sg ->
-                        val a = (maxOf(sg.s, hs) - hs) / 3600000f
-                        val b = (minOf(sg.e, he) - hs) / 3600000f
-                        fill.color = pint(sg.tag.color)
-                        c.drawRoundRect(RectF(bx + a * bw, y, maxOf(bx + b * bw, bx + a * bw + 8f), y + 17f), 8f, 8f, fill)
+            // 标题：日期 + 天气
+            ink.textAlign = Paint.Align.CENTER
+            ink.textSize = 36f
+            val wx = d.weather[date.toString()] ?: ""
+            c.drawText("" + date.monthValue + "月" + date.dayOfMonth + "日  周" + "一二三四五六日"[date.dayOfWeek.value - 1] + (if (wx.isEmpty()) "" else "  " + wx), W / 2f, 56f, ink)
+
+            // 时间范围：有记录就贴着记录，至少 8 小时
+            var startH = 6
+            var endH = 22
+            if (evs.isNotEmpty()) {
+                startH = (((evs.minOf { it.st } - ds) / 3600000L).toInt() - 1).coerceIn(0, 16)
+                endH = (((evs.maxOf { it.en } - ds) / 3600000L).toInt() + 2).coerceIn(startH + 8, 24)
+                if (endH - startH < 8) startH = (endH - 8).coerceAtLeast(0)
+            }
+            val top = 84f
+            val pxH = (H - top - 12f) / (endH - startH)
+            assignLanes(evs, (44f / pxH * 3600000f).toLong())
+            val left = 64f
+            val w = W - left - 14f
+            gray.textAlign = Paint.Align.LEFT
+            for (h in startH..endH) {
+                val y = top + (h - startH) * pxH
+                c.drawLine(left, y, W - 8f, y, line)
+                if (h < 24) c.drawText("%02d".format(h), 10f, y + 8f, gray)
+            }
+            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 25f }
+            val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC1E1E1E.toInt(); textSize = 22f }
+            evs.forEach { e ->
+                val y0 = top + ((e.st - ds) / 3600000f - startH) * pxH
+                val y1 = top + ((e.vEn - ds) / 3600000f - startH) * pxH - 2f
+                val lw = w / e.lanes
+                val x0 = left + e.lane * lw
+                val x1 = x0 + lw - 4f
+                val col = pint(e.tag.color)
+                fill.color = (col and 0x00FFFFFF) or (0x55 shl 24)
+                c.drawRoundRect(RectF(x0, y0, x1, y1), 10f, 10f, fill)
+                fill.color = col or (0xFF shl 24)
+                c.drawRoundRect(RectF(x0, y0, x0 + 7f, y1), 4f, 4f, fill)
+                val tw = x1 - x0 - 22f
+                val head = e.emoji + e.name + " | " + fmtMin(e.en - e.st)
+                var ty = y0 + 28f
+                if (y1 - y0 >= 34f) c.drawText(TextUtils.ellipsize(head, tp, tw, TextUtils.TruncateAt.END).toString(), x0 + 16f, ty, tp)
+                if (e.s.note.isNotBlank() && y1 - y0 > 70f) {
+                    ty += 28f
+                    val maxLines = ((y1 - ty) / 26f).toInt().coerceIn(0, 4)
+                    var rest = e.s.note.replace("\n", " ")
+                    var n = 0
+                    while (n < maxLines && rest.isNotEmpty()) {
+                        val cnt = np.breakText(rest, true, tw, null).coerceAtLeast(1)
+                        c.drawText(rest.substring(0, cnt), x0 + 16f, ty, np)
+                        rest = rest.substring(cnt)
+                        ty += 26f
+                        n++
+                    }
+                }
+                if (e.s.photos.isNotEmpty() && y1 - ty > 90f) {
+                    val th = decodeThumb(e.s.photos.first(), 320)
+                    if (th != null) {
+                        val availH = (y1 - ty - 8f).coerceAtMost(330f)
+                        val sc = minOf(tw / th.width, availH / th.height)
+                        val pw = th.width * sc
+                        val ph = th.height * sc
+                        c.drawBitmap(th, null, RectF(x0 + 16f, ty, x0 + 16f + pw, ty + ph), null)
                     }
                 }
             }
-            // 空白时间
-            val all = unionMin(segs.map { it.s to it.e })
-            val blank = 1440L - all
-            fill.color = 0xFFE4E4E0.toInt()
-            c.drawCircle(40f, 372f, 9f, fill)
-            ink.textAlign = Paint.Align.LEFT
-            ink.textSize = 24f
-            c.drawText("空白", 60f, 381f, ink)
-            ink.textAlign = Paint.Align.RIGHT
-            c.drawText((blank / 60).toString() + "h " + (blank % 60) + "m", 420f, 381f, ink)
-
-            // ---- 分隔虚线 ----
-            val dash = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB8B8B2.toInt(); strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(8f, 8f), 0f) }
-            c.drawLine(440f, 16f, 440f, 384f, dash)
-
-            // ---- 右：日期、圆环、项目时长 ----
-            ink.textAlign = Paint.Align.CENTER
-            ink.textSize = 34f
-            c.drawText("" + date.monthValue + "月" + date.dayOfMonth + "日", 660f, 48f, ink)
-            val ring = RectF(660f - 95f, 190f - 95f, 660f + 95f, 190f + 95f)
-            val rp = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 34f; color = 0xFFE4E4E0.toInt() }
-            c.drawArc(ring, 0f, 360f, false, rp)
-            // 按项目（分组）统计
-            val byGroup = segs.groupBy { it.tag.group }.map { (g, list) ->
-                Triple(g, pint(list.first().tag.color), unionMin(list.map { it.s to it.e }))
-            }.sortedByDescending { it.third }
-            var start = -90f
-            byGroup.forEach { (_, col, min) ->
-                val sweep = maxOf(min / 1440f * 360f, 2f)
-                rp.color = col
-                c.drawArc(ring, start, sweep, false, rp)
-                start += sweep
-            }
-            ink.textSize = 36f
-            c.drawText("" + (all * 100 / 1440) + "%", 660f, 203f, ink)
-            // 图例
-            byGroup.take(3).forEachIndexed { i, (g, col, min) ->
-                val y = 322f + i * 32f
-                fill.color = col
-                c.drawCircle(470f, y - 7f, 9f, fill)
-                ink.textAlign = Paint.Align.LEFT
-                ink.textSize = 22f
-                c.drawText(g, 492f, y, ink)
-                ink.textAlign = Paint.Align.RIGHT
-                c.drawText(fmtDur(min), 850f, y, ink)
+            if (date == LocalDate.now()) {
+                val y = top + ((now - ds) / 3600000f - startH) * pxH
+                if (y in top..(H - 4f)) {
+                    fill.color = 0xFFE0143C.toInt()
+                    c.drawRect(left, y - 1.5f, W - 8f, y + 1.5f, fill)
+                    c.drawCircle(left, y, 7f, fill)
+                }
             }
             return bmp
         }
@@ -285,10 +280,7 @@ class TaskWidget : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         Repo.init(context)
-        if (intent.action == ACTION_DONE) {
-            val id = intent.getStringExtra("task") ?: return
-            if (Repo.completeTask(id) != null) Media.cheer(context, Repo.data.prefs.character)
-        }
+        // 完成要先对照达成条件、写感想，所以点圆圈改成打开 App 的结算窗（见 MainActivity）
     }
 
     companion object {
@@ -316,7 +308,7 @@ class TaskWidget : AppWidgetProvider() {
                 rv.setImageViewBitmap(circles[i], Widgets.hollowCircle(pint(Repo.list(t.listId).color)))
                 rv.setTextViewText(titles[i], t.title)
                 rv.setTextViewText(counts[i], if (t.subs.isEmpty()) "" else t.subs.size.toString())
-                rv.setOnClickPendingIntent(circles[i], Widgets.pi(ctx, TaskWidget::class.java, ACTION_DONE, "task" to t.id))
+                rv.setOnClickPendingIntent(circles[i], Widgets.settlePi(ctx, t.id))
             }
             return rv
         }

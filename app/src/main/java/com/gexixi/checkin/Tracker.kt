@@ -42,6 +42,7 @@ class TrackerService : Service() {
     private var autoPkg: String? = null     // 正在自动记录的 App
     private var autoStart = 0L
     private var lastQuery = 0L
+    private var leaveAt = 0L              // 离开被记录 App 的时间；超过宽限才正式结束
     private var lastWidget = 0L
     private var lastNotif = 0L
     private var started = false
@@ -102,19 +103,29 @@ class TrackerService : Service() {
             }
         } catch (_: Exception) {}
         val mapped = Repo.data.prefs.autoMap.firstOrNull { it.pkg == fgPkg && fgPkg != packageName }
-        if (mapped == null || mapped.pkg != autoPkg) {
-            endAuto()
-            if (mapped != null) { autoPkg = mapped.pkg; autoStart = if (fgSince > 0) fgSince else now }
+        if (mapped != null && mapped.pkg == autoPkg) {
+            leaveAt = 0L                       // 一分钟内切回来了，接着记，不拆成碎片
+        } else if (autoPkg != null) {
+            if (leaveAt == 0L) leaveAt = now
+            if (mapped != null || now - leaveAt >= GRACE_MS) {
+                endAuto(leaveAt)
+                leaveAt = 0L
+                if (mapped != null) { autoPkg = mapped.pkg; autoStart = if (fgSince > 0) fgSince else now }
+            }
+        } else if (mapped != null) {
+            autoPkg = mapped.pkg
+            autoStart = if (fgSince > 0) fgSince else now
+            leaveAt = 0L
         }
     }
 
-    /** 结束自动记录；太短的切换（默认不到10秒）不记，避免一堆碎片。自动记录不发小红花、不播语音。 */
-    private fun endAuto() {
+    /** 结束自动记录；不到设定分钟数（默认 5 分钟）的不记。自动记录不发金币、不播语音。 */
+    private fun endAuto(endMs: Long = System.currentTimeMillis()) {
         val pkg = autoPkg ?: return
         autoPkg = null
         val p = Repo.data.prefs
-        val end = System.currentTimeMillis()
-        if (end - autoStart < p.minSec * 1000L) return
+        val end = endMs
+        if (end - autoStart < p.minMin.coerceAtLeast(1) * 60000L) return
         val tagId = p.autoMap.firstOrNull { it.pkg == pkg }?.tagId ?: return
         Repo.addSession(Session(uid(), tagId, autoStart, end, auto = true))
     }
@@ -160,6 +171,7 @@ class TrackerService : Service() {
     companion object {
         const val CHANNEL = "tracking"
         const val NOTIF_ID = 7
+        const val GRACE_MS = 60000L
         const val ACTION_STOP_ALL = "com.gexixi.checkin.STOP_ALL"
     }
 }

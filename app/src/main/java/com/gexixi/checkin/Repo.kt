@@ -17,12 +17,14 @@ import java.util.zip.ZipOutputStream
 /** 完成任务后弹窗要显示的内容 */
 data class Cel(
     val gain: Int,
-    val ch: String = "",       // 角色key，决定弹窗GIF
-    val text: String = "",     // 这条鼓励音频的台词
-    val reward: String = "",   // 任务奖励（直接领取，不扣小红花）
-    val hint: String = "",     // 现在可兑换 / 再差N朵
+    val ch: String = "",        // 角色key，决定弹窗GIF
+    val text: String = "",      // 这条鼓励音频的台词
+    val reward: String = "",    // 任务奖励（宝箱，直接领取，不扣金币）
+    val hint: String = "",      // 现在可兑换 / 再差N枚
     val todayN: Int = 0,
-    val goal: Int = 5
+    val goal: Int = 5,
+    val comment: String = "",   // AI 结算评语
+    val planned: Int = -1       // 建任务时预设的金币数（和实际不同时显示）
 )
 
 object Repo {
@@ -32,16 +34,32 @@ object Repo {
     var data by mutableStateOf(Data())
         private set
 
+    /** 等待结算的任务 id：非空时，App 最外层会弹出「完成前先自检」的结算窗 */
+    var settleId by mutableStateOf("")
+
     fun init(ctx: Context) {
         if (inited) return
         app = ctx.applicationContext
         file = File(app.filesDir, "dangxia.json")
-        data = try {
+        val loaded = try {
             Gson().fromJson(file.readText(), Data::class.java) ?: Data()
         } catch (e: Exception) {
             Data()
         }
+        data = normalize(loaded)
         inited = true
+    }
+
+    /** 旧版数据升级：补上新增的自动记录对应、金币图标、5 分钟门槛 */
+    private fun normalize(d0: Data): Data {
+        var d = d0
+        if (d.ver < 2) {
+            val p = d.prefs
+            val have = p.autoMap.map { it.pkg }.toSet()
+            val extra = defaultAutoMap().filter { m -> m.pkg !in have && d.tags.any { it.id == m.tagId } }
+            d = d.copy(prefs = p.copy(coin = "🪙", minMin = 5, autoMap = p.autoMap + extra), ver = 2)
+        }
+        return d
     }
 
     /** 仅供 Android Studio 预览窗格塞示例数据 */
@@ -95,10 +113,64 @@ object Repo {
 
     fun addSession(s: Session) { update { it.copy(sessions = it.sessions + s) }; Widgets.refreshAll(app) }
     fun addTag(t: Tag) { update { it.copy(tags = it.tags + t) }; Widgets.refreshAll(app) }
+
+    fun updateTag(t: Tag) {
+        update { d -> d.copy(tags = d.tags.map { if (it.id == t.id) t else it }) }
+        Widgets.refreshAll(app)
+    }
+
     fun deleteTag(id: String) {
         update { d -> d.copy(tags = d.tags.filter { it.id != id }, sessions = d.sessions.filter { it.tagId != id }) }
         Widgets.refreshAll(app)
     }
+
+    fun updateSession(id: String, f: (Session) -> Session) {
+        update { d -> d.copy(sessions = d.sessions.map { if (it.id == id) f(it) else it }) }
+        Widgets.refreshAll(app)
+    }
+
+    fun deleteSession(id: String) {
+        val s = data.sessions.firstOrNull { it.id == id }
+        update { d -> d.copy(sessions = d.sessions.filter { it.id != id }) }
+        s?.photos?.forEach { try { File(it).delete() } catch (_: Exception) {} }
+        Widgets.refreshAll(app)
+    }
+
+    fun setWeather(date: String, emoji: String) {
+        update { d -> d.copy(weather = if (emoji.isEmpty()) d.weather - date else d.weather + (date to emoji)) }
+        Widgets.refreshAll(app)
+    }
+
+    /** 清掉已经记下的、不到 minMin 分钟的自动记录（带了文字或照片的保留） */
+    fun purgeShortAuto(minMin: Int): Int {
+        val lim = minMin * 60000L
+        val bad = data.sessions.filter { it.auto && it.end != null && it.end - it.start < lim && it.note.isBlank() && it.photos.isEmpty() }
+        if (bad.isEmpty()) return 0
+        val ids = bad.map { it.id }.toSet()
+        update { d -> d.copy(sessions = d.sessions.filter { it.id !in ids }) }
+        Widgets.refreshAll(app)
+        return bad.size
+    }
+
+    /** 记录页进度卡里的 10 个标签：最近两周手动记得最多的，不够 10 个用默认常用补 */
+    fun quickTags(): List<Tag> {
+        val since = System.currentTimeMillis() - 14 * 86400000L
+        val counts = data.sessions.filter { !it.auto && it.start >= since }.groupingBy { it.tagId }.eachCount()
+        val top = counts.entries.sortedByDescending { it.value }.mapNotNull { e -> tag(e.key) }.take(10)
+        val out = top.toMutableList()
+        for (id in QUICK_DEFAULT) {
+            if (out.size >= 10) break
+            val t = tag(id)
+            if (t != null && out.none { it.id == t.id }) out.add(t)
+        }
+        for (t in data.tags) {
+            if (out.size >= 10) break
+            if (out.none { it.id == t.id }) out.add(t)
+        }
+        return out.take(10)
+    }
+
+    fun setShopOpen(b: Boolean) { update { it.copy(shopOpen = b) } }
 
     // ================= 任务 =================
     fun visibleTasks(): List<Task> {
@@ -113,6 +185,7 @@ object Repo {
     }
 
     fun list(id: String): TaskList = data.lists.firstOrNull { it.id == id } ?: data.lists.first()
+    fun addList(l: TaskList) { update { it.copy(lists = it.lists + l) } }
 
     private fun withReward(t: Task, wishes: List<Wish>): Pair<Task, List<Wish>> {
         if (t.reward.isBlank()) return t to wishes
@@ -206,19 +279,32 @@ object Repo {
         val base = if (parsed == null || parsed.isBefore(LocalDate.now())) LocalDate.now() else parsed
         val next = nextDate(t, base)
         val end = runCatching { LocalDate.parse(t.repeatEnd) }.getOrNull()
-        val reset = t.copy(date = next.toString(), subs = t.subs.map { it.copy(done = false) }, doneDates = t.doneDates + td)
+        val reset = t.copy(
+            date = next.toString(), subs = t.subs.map { it.copy(done = false) }, doneDates = t.doneDates + td,
+            doneNote = "", settled = -1, settleComment = ""
+        )
         return if (end != null && next.isAfter(end)) reset.copy(done = true, doneAt = System.currentTimeMillis()) else reset
     }
 
-    /** 完成任务：只有任务能产生小红花。重复任务自动在下一个日期重新出现、子任务重置。 */
-    fun completeTask(id: String): Cel? {
+    /** 点「完成」先走结算窗（自检达成条件 + 写感想），结算完才真正完成 */
+    fun requestSettle(id: String) { settleId = id }
+
+    /**
+     * 完成任务：只有任务能产生金币。
+     * coins 为空 = 按预设；不为空 = 结算后的实际金币（可能和预设不同）。重复任务自动在下一个日期重新出现、子任务重置。
+     */
+    fun completeTask(id: String, coins: Int? = null, note: String = "", comment: String = ""): Cel? {
         val t = data.tasks.firstOrNull { it.id == id } ?: return null
         val cap = data.prefs.rewardCap
-        val gain = if (cap > 0) t.flowers.coerceAtMost(cap) else t.flowers
+        val planned = if (cap > 0) t.flowers.coerceAtMost(cap) else t.flowers
+        val gain = (coins ?: planned).coerceAtLeast(0)
         val now = System.currentTimeMillis()
         val td = today()
         update { d ->
-            val fin = t.copy(workMs = t.workMs + (if (t.timerStart > 0) now - t.timerStart else 0L), timerStart = 0, timerSub = -1)
+            val fin = t.copy(
+                workMs = t.workMs + (if (t.timerStart > 0) now - t.timerStart else 0L), timerStart = 0, timerSub = -1,
+                doneNote = note, settled = gain, settleComment = comment
+            )
             val tasks = d.tasks.map { x ->
                 if (x.id != id) x
                 else if (t.repeat == 0) fin.copy(done = true, doneAt = now, subs = fin.subs.map { it.copy(done = true) }, doneDates = fin.doneDates + td)
@@ -235,22 +321,25 @@ object Repo {
         val ongoing = data.wishes.filter { it.kind == 0 && it.status == 0 }
         val can = ongoing.filter { it.cost <= bal }.maxByOrNull { it.cost }
         val hint = if (can != null) "现在可兑换：" + can.name
-        else ongoing.minByOrNull { it.cost }?.let { "再 " + (it.cost - bal) + " 朵就能兑换" + it.name } ?: ""
-        return Cel(gain, reward = if (t.reward.isNotBlank()) t.reward else "", hint = hint, todayN = todayFlowers(), goal = data.prefs.dailyGoal)
+        else ongoing.minByOrNull { it.cost }?.let { "再 " + (it.cost - bal) + " 枚就能兑换" + it.name } ?: ""
+        return Cel(
+            gain, reward = t.reward, hint = hint, todayN = todayFlowers(), goal = data.prefs.dailyGoal,
+            comment = comment, planned = planned
+        )
     }
 
-    // ================= 心愿 =================
+    // ================= 游戏商城 =================
     fun addWish(w: Wish) { update { it.copy(wishes = it.wishes + w) } }
     fun deleteWish(id: String) { update { it.copy(wishes = it.wishes.filter { w -> w.id != id }) } }
 
-    /** 兑换：扣小红花、移到已实现并记录日期。返回错误提示，成功返回 null。 */
+    /** 兑换：扣金币、移到已实现并记录日期。返回错误提示，成功返回 null。 */
     fun redeem(id: String): String? {
-        val w = data.wishes.firstOrNull { it.id == id } ?: return "找不到这个心愿"
-        if (w.kind != 0 || w.status != 0) return "这个心愿不能兑换"
-        if (balance() < w.cost) return "小红花还差 " + (w.cost - balance()) + " 朵"
+        val w = data.wishes.firstOrNull { it.id == id } ?: return "找不到这件商品"
+        if (w.kind != 0 || w.status != 0) return "这件商品不能兑换"
+        if (balance() < w.cost) return "金币还差 " + (w.cost - balance()) + " 枚"
         val lim = data.prefs.dailyLimit
         val td = today()
-        if (lim > 0 && data.wishes.count { it.kind == 0 && it.status == 1 && it.doneDate == td } >= lim) return "今天最多兑换 $lim 个"
+        if (lim > 0 && data.wishes.count { it.kind == 0 && it.status == 1 && it.doneDate == td } >= lim) return "今天最多兑换 $lim 件"
         update { d ->
             d.copy(
                 spent = d.spent + w.cost,
@@ -273,8 +362,9 @@ object Repo {
     // ================= 小组件状态 / 备份 =================
     fun setWidgetGroup(g: String) { update { it.copy(widgetGroup = g) }; Widgets.refreshAll(app) }
     fun shiftSummary(delta: Int) { update { it.copy(sumOffset = (it.sumOffset + delta).coerceAtMost(0)) }; Widgets.refreshAll(app) }
+    fun resetSummary() { update { it.copy(sumOffset = 0) }; Widgets.refreshAll(app) }
 
-    /** 导出备份：数据 + 日记 + 心愿图片 打成一个压缩包 */
+    /** 导出备份：数据 + 日记 + 记录里的照片 + 商品图片 打成一个压缩包 */
     fun exportBackup(ctx: Context, uri: Uri) {
         ctx.contentResolver.openOutputStream(uri)?.use { os ->
             ZipOutputStream(os).use { z ->
@@ -286,6 +376,9 @@ object Repo {
                 if (file.exists()) add(file, "dangxia.json")
                 File(app.filesDir, "diary").walkTopDown().filter { it.isFile }.forEach {
                     add(it, "diary/" + it.relativeTo(File(app.filesDir, "diary")).path)
+                }
+                File(app.filesDir, "notes").walkTopDown().filter { it.isFile }.forEach {
+                    add(it, "notes/" + it.relativeTo(File(app.filesDir, "notes")).path)
                 }
                 app.filesDir.listFiles()?.filter { it.isFile && it.name.startsWith("wish_") }?.forEach { add(it, "wishes/" + it.name) }
             }

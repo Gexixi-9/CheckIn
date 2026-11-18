@@ -109,3 +109,16 @@ fun Bar(p: Float, color: Color, modifier: Modifier = Modifier) {
         Box(Modifier.fillMaxHeight().fillMaxWidth(p.coerceIn(0f, 1f)).background(color))
     }
 }
+
+/** 缩略图（小组件和日历里放照片用），按最大边解码，省内存 */
+fun decodeThumb(path: String, maxPx: Int): Bitmap? = try {
+    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, o)
+    var s = 1
+    while (o.outWidth / s > maxPx * 2 || o.outHeight / s > maxPx * 2) s *= 2
+    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = s })
+} catch (e: Exception) {
+    null
+}
+
+fun fmtDur(min: Long): String = if (min >= 60) "" + (min / 60) + "h " + (min % 60) + "m" else "" + min + "m"

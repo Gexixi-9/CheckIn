@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 object C {
-    // 12 色项目色板
+    // 12 色项目色板（按你给的彩色小方块便签图）
     val palette = listOf(
         0xFFE0143C, 0xFFF6F0DC, 0xFFC9C43A, 0xFFC8E23C, 0xFFA8E06A, 0xFF4FCB8C,
         0xFF2BA8E0, 0xFF9FB8E8, 0xFFC7AEEB, 0xFF7A3FC0, 0xFFEE7C95, 0xFF8E9093
@@ -42,13 +42,26 @@ object C {
     val red = Color(0xFFE0143C)
     val pink = Color(0xFFEE7C95)
     val gray = Color(0xFF8E9093)
+    val gold = Color(0xFFE8B84A)
+    val night = Color(0xFF15171A)
 }
 
 fun pcol(i: Int): Color = Color(C.palette[i.coerceIn(0, 11)])
 fun pint(i: Int): Int = C.palette[i.coerceIn(0, 11)].toInt()
 
-/** 小红花图标（设置里可换成别的字符/emoji） */
-fun flowerIcon(): String = Repo.data.prefs.flower.ifBlank { "♥" }
+/** 色板色和白色混合，做便当格的浅色底 */
+fun soft(i: Int, a: Float = 0.3f): Color {
+    val c = pcol(i)
+    return Color(1f - (1f - c.red) * a, 1f - (1f - c.green) * a, 1f - (1f - c.blue) * a)
+}
+
+/** 深一号的同色系（字体颜色用） */
+fun darker(c: Color, k: Float = 0.5f): Color = Color(c.red * k, c.green * k, c.blue * k, c.alpha)
+
+fun lerpF(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+
+/** 金币图标（设置里可换成别的字符/emoji） */
+fun coinIcon(): String = Repo.data.prefs.coin.ifBlank { "🪙" }
 
 /** 方格纸底 */
 fun Modifier.paper(): Modifier = this.background(C.paper).drawBehind {
