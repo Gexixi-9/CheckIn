@@ -32,7 +32,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -130,11 +129,11 @@ fun PlanPage(onSettings: () -> Unit) {
         }
         BentoRow {
             // 商城开关卡：开启时主色底、白字；关闭时白底，点不开
-            Bento(Modifier.size(cell), color = shopColor, title = "游戏商城", detail = { ShopScreen() }, enabled = d.shopOpen) {
+            Bento(Modifier.size(cell), color = shopColor, detailColor = SHOP_BG_TOP, title = "游戏商城", detail = { ShopScreen() }, enabled = d.shopOpen) {
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("商城", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = shopFg)
-                        ElasticSwitch(d.shopOpen, { Repo.setShopOpen(it) }, onColor = Color(0xFF8E9BFF))
+                        ElasticSwitch(d.shopOpen, { Repo.setShopOpen(it) }, onColor = Color(0xFF8A8A8E))
                     }
                     Spacer(Modifier.weight(1f))
                     ChestIcon(34.dp)
@@ -224,12 +223,7 @@ fun PlanPage(onSettings: () -> Unit) {
             Bento(Modifier.size(cell), color = soft(9, 0.35f), onClick = { showAi = true }) {
                 Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Box(Modifier.magnetic().size(64.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                        Image(
-                            painter = painterResource(R.drawable.ic_android),
-                            contentDescription = "Android",
-                            modifier = Modifier.size(38.dp),
-                            contentScale = ContentScale.Fit
-                        )
+                        Text("🤖", fontSize = 32.sp)
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("AI 拆分", color = C.ink, fontWeight = FontWeight.Medium)
@@ -482,7 +476,7 @@ fun CoinLogScreen() {
 
 // ============================ 任务详情 / 新建 ============================
 @Composable
-fun TaskEditor(initial: Task?, onDismiss: () -> Unit, onSave: (Task) -> Unit) {
+fun TaskEditor(initial: Task?, onDismiss: () -> Unit, presetDate: String = "", presetTime: String = "", onSave: (Task) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val d = Repo.data
@@ -490,9 +484,9 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, onSave: (Task) -> Unit) {
     var note by remember { mutableStateOf(initial?.note ?: "") }
     var url by remember { mutableStateOf(initial?.url ?: "") }
     var hasDate by remember { mutableStateOf(initial?.date?.isNotEmpty() ?: true) }
-    var date by remember { mutableStateOf(initial?.date?.ifEmpty { Repo.today() } ?: Repo.today()) }
-    var hasTime by remember { mutableStateOf(initial?.time?.isNotEmpty() ?: false) }
-    var time by remember { mutableStateOf(initial?.time?.ifEmpty { "09:00" } ?: "09:00") }
+    var date by remember { mutableStateOf(initial?.date?.ifEmpty { Repo.today() } ?: presetDate.ifEmpty { Repo.today() }) }
+    var hasTime by remember { mutableStateOf(initial?.time?.isNotEmpty() ?: presetTime.isNotEmpty()) }
+    var time by remember { mutableStateOf(initial?.time?.ifEmpty { "09:00" } ?: presetTime.ifEmpty { "09:00" }) }
     var rep by remember { mutableIntStateOf(initial?.repeat ?: 0) }
     var every by remember { mutableStateOf((initial?.every ?: 1).toString()) }
     var weekdays by remember { mutableStateOf(initial?.weekdays ?: emptyList()) }
@@ -566,7 +560,7 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, onSave: (Task) -> Unit) {
                             val empty = goal.isBlank() && cond.isBlank() && subs.isBlank()
                             if (initial == null && empty) aiFill(true) else onSave(build())
                         }
-                    }) { Text(if (busy) "AI 填写中…" else "保存", color = C.red, fontWeight = FontWeight.Bold) }
+                    }) { Text(if (busy) "AI 填写中…" else "保存", color = C.accent, fontWeight = FontWeight.Bold) }
                 }
                 Column(
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -583,7 +577,7 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, onSave: (Task) -> Unit) {
                         ElasticSwitch(hasDate, { hasDate = it })
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("时间（只用来排序和显示，不会提醒）", Modifier.weight(1f), fontSize = 13.sp)
+                        Text("具体时间（会出现在日历里，不会提醒）", Modifier.weight(1f), fontSize = 13.sp)
                         if (hasTime) RippleButton(time, { pickTime(ctx, time) { time = it } })
                         Spacer(Modifier.width(8.dp))
                         ElasticSwitch(hasTime, { hasTime = it })
@@ -768,7 +762,7 @@ fun AiDialog(onDismiss: () -> Unit) {
                     result.forEachIndexed { i, t -> Repo.addTask(t, makeCurrent = i == 0) }
                     Voice.announce(ctx, result.first())
                     onDismiss()
-                }) { Text("确认加入", color = C.red) }
+                }) { Text("确认加入", color = C.accent) }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
@@ -833,7 +827,7 @@ fun SettleDialog(taskId: String, onResult: (Cel?) -> Unit) {
                         }
                     }
                 } else onResult(completeWith(ctx, t.id, null, note, ""))
-            }) { Text("结算", color = C.red, fontWeight = FontWeight.Bold) }
+            }) { Text("结算", color = C.accent, fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
             Row {
@@ -887,7 +881,7 @@ fun CelebrateDialog(c: Cel, onClose: () -> Unit) {
                                 Text(" " + c.reward, fontSize = 13.sp, color = C.ink)
                             }
                         }
-                        if (c.hint.isNotBlank()) Text(c.hint, fontSize = 13.sp, color = C.red, fontWeight = FontWeight.Medium)
+                        if (c.hint.isNotBlank()) Text(c.hint, fontSize = 13.sp, color = C.accent, fontWeight = FontWeight.Medium)
                     }
                 }
                 Spacer(Modifier.height(18.dp))

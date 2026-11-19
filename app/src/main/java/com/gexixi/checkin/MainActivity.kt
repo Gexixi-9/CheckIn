@@ -26,7 +26,13 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.font.FontWeight
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -80,11 +86,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun App() {
     val ctx = LocalContext.current
-    var screen by remember { mutableIntStateOf(1) }      // 0 记录  1 规划（默认）  2 设置
-    var lastTab by remember { mutableIntStateOf(1) }
+    val pager = rememberPagerState(initialPage = 1, pageCount = { 3 })      // 0 记录  1 规划（默认）  2 人物（在规划右边）
+    val scope = rememberCoroutineScope()
+    var settings by remember { mutableStateOf(false) }
     var cel by remember { mutableStateOf<Cel?>(null) }
     val host = remember { BentoHost() }
     val pointer = remember { mutableStateOf<Offset?>(null) }
@@ -93,20 +101,30 @@ fun App() {
         if (Build.VERSION.SDK_INT >= 33) perm.launch(Manifest.permission.POST_NOTIFICATIONS)
         Tracker.ensure(ctx)
     }
-    BackHandler(enabled = screen == 2) { screen = lastTab }
-    MaterialTheme(colorScheme = lightColorScheme(primary = C.red, background = C.paper, surface = C.paper)) {
+    BackHandler(enabled = settings) { settings = false }
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            primary = C.accent, onPrimary = Color.White, background = C.paper, surface = C.paper,
+            secondaryContainer = Color(0xFFE6E6E8), onSecondaryContainer = C.ink
+        )
+    ) {
         CompositionLocalProvider(LocalBento provides host, LocalPointer provides pointer) {
             Box(Modifier.fillMaxSize().background(C.paper).trackPointer(pointer)) {
-                Box(Modifier.fillMaxSize()) {
-                    when (screen) {
-                        0 -> RecordPage(onSettings = { lastTab = 0; screen = 2 })
-                        1 -> PlanPage(onSettings = { lastTab = 1; screen = 2 })
-                        else -> SettingsPage(onBack = { screen = lastTab })
+                HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !settings) { page ->
+                    when (page) {
+                        0 -> RecordPage(onSettings = { settings = true })
+                        1 -> PlanPage(onSettings = { settings = true })
+                        else -> PeoplePage()
                     }
                 }
-                // 悬浮的玻璃底栏：盖在内容上面，展开的卡片会再盖住它
+                if (settings) SettingsPage(onBack = { settings = false })
+                // 悬浮的深色玻璃底栏：盖在内容上面，展开的卡片会再盖住它
                 GlassBar(
-                    screen, { screen = it },
+                    pager.currentPage + pager.currentPageOffsetFraction, !settings,
+                    { i ->
+                        settings = false
+                        scope.launch { pager.animateScrollToPage(i, 0f, spring(dampingRatio = 0.72f, stiffness = 260f)) }
+                    },
                     Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 14.dp)
                 )
                 BentoOverlay(host)
@@ -124,41 +142,41 @@ fun App() {
 }
 
 /**
- * 悬浮玻璃底栏（参照小米文件管理器）：半透明圆角胶囊，里面两个入口，
- * 选中的那块浅灰底会用弹簧滑过去（带一点过冲和拉伸），按下时图标整体回弹。
+ * 悬浮深色玻璃底栏：半透明深灰胶囊，里面两个入口（记录 / 规划），人物页在规划右边、不占底栏。
+ * 选中的浅灰块用弹簧滑过去（带一点过冲和拉伸），也会跟着左右滑页面实时移动；图标和文字挨得很近。
  */
 @Composable
-fun GlassBar(screen: Int, onPick: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val itemW = 96.dp
-    val idx by animateFloatAsState(if (screen in 0..1) screen.toFloat() else 0f, springF(380f, 20f), label = "barIdx")
-    val show by animateFloatAsState(if (screen in 0..1) 1f else 0f, tween(220), label = "barShow")
+fun GlassBar(pos: Float, show: Boolean, onPick: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val itemW = 92.dp
+    val idx by animateFloatAsState(pos.coerceIn(0f, 1f), springF(380f, 20f), label = "barIdx")
+    val vis by animateFloatAsState(if (show) (2f - pos).coerceIn(0f, 1f) else 0f, tween(200), label = "barVis")
     val mid = (4f * idx * (1f - idx)).coerceIn(0f, 1f)
-    val shape = RoundedCornerShape(34.dp)
+    val shape = RoundedCornerShape(32.dp)
     Box(
         modifier
             .clip(shape)
-            .background(Brush.verticalGradient(listOf(Color(0xEBFFFFFF), Color(0xB8FFFFFF))))
-            .border(1.dp, Color(0xCCFFFFFF), shape)
+            .background(Brush.verticalGradient(listOf(Color(0xD92E2E33), Color(0xBF1F1F23))))
+            .border(1.dp, Color(0x40FFFFFF), shape)
             .padding(5.dp)
     ) {
         Box(
             Modifier
                 .offset { IntOffset((idx * itemW.toPx()).roundToInt(), 0) }
-                .size(itemW, 54.dp)
-                .graphicsLayer { alpha = show; scaleX = 1f + 0.22f * mid }
-                .clip(RoundedCornerShape(28.dp))
-                .background(Color(0x1F000000))
+                .size(itemW, 48.dp)
+                .graphicsLayer { alpha = vis; scaleX = 1f + 0.22f * mid }
+                .clip(RoundedCornerShape(26.dp))
+                .background(Color(0x40FFFFFF))
         )
         Row {
             listOf("记录", "规划").forEachIndexed { i, n ->
                 Column(
-                    Modifier.size(itemW, 54.dp).bounceClick { onPick(i) },
+                    Modifier.size(itemW, 48.dp).bounceClick { onPick(i) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     BarIcon(i)
-                    Spacer(Modifier.height(3.dp))
-                    Text(n, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = C.ink)
+                    Spacer(Modifier.height(2.dp))
+                    Text(n, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
@@ -168,15 +186,16 @@ fun GlassBar(screen: Int, onPick: (Int) -> Unit, modifier: Modifier = Modifier) 
 /** 实心线条小图标：0 = 钟（记录），1 = 靶心（规划） */
 @Composable
 private fun BarIcon(kind: Int) {
-    Canvas(Modifier.size(22.dp)) {
+    Canvas(Modifier.size(20.dp)) {
         val w = this.size.width
+        val dark = Color(0xFF2E2E33)
         if (kind == 0) {
-            drawCircle(C.ink, w / 2f)
-            drawLine(Color.White, Offset(w / 2f, w / 2f), Offset(w / 2f, w * 0.22f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
-            drawLine(Color.White, Offset(w / 2f, w / 2f), Offset(w * 0.72f, w * 0.62f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+            drawCircle(Color.White, w / 2f)
+            drawLine(dark, Offset(w / 2f, w / 2f), Offset(w / 2f, w * 0.22f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+            drawLine(dark, Offset(w / 2f, w / 2f), Offset(w * 0.72f, w * 0.62f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
         } else {
-            drawCircle(C.ink, w / 2f - w * 0.06f, style = Stroke(w * 0.12f))
-            drawCircle(C.ink, w * 0.2f)
+            drawCircle(Color.White, w / 2f - w * 0.06f, style = Stroke(w * 0.12f))
+            drawCircle(Color.White, w * 0.2f)
         }
     }
 }

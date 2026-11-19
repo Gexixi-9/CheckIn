@@ -41,7 +41,7 @@ fun fmt(ms: Long): String {
 
 fun fmtMin(ms: Long): String {
     val m = ms / 60000
-    return if (m >= 60) "" + (m / 60) + "小时" + (m % 60) + "分" else "" + m + "分"
+    return if (m >= 60) "" + (m / 60) + "小时" + (m % 60) + "分钟" else "" + m + "分钟"
 }
 
 fun pickDate(ctx: Context, init: String, onPick: (String) -> Unit) {

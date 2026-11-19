@@ -9,17 +9,33 @@ class Ev(val s: Session, val tag: Tag, val st: Long, val en: Long) {
     var lanes = 1
     val emoji: String get() = s.emoji.ifBlank { tag.emoji }
     val name: String get() = s.title.ifBlank { tag.name }
+    /** 日历里「有具体时间的待办」也画成一个块（id 以 task_ 开头），点圆圈就是完成 */
+    val isTask: Boolean get() = s.id.startsWith("task_")
+    val taskId: String get() = s.id.removePrefix("task_")
 }
 
-fun dayEvents(d: Data, date: LocalDate, now: Long = System.currentTimeMillis()): List<Ev> {
+fun dayEvents(d: Data, date: LocalDate, now: Long = System.currentTimeMillis(), withTasks: Boolean = true): List<Ev> {
     val ds = Repo.dayStart(date)
     val de = ds + 86400000L
-    return d.sessions.mapNotNull { s ->
+    val out = d.sessions.mapNotNull { s ->
         val tag = d.tags.firstOrNull { it.id == s.tagId } ?: return@mapNotNull null
         val st = maxOf(s.start, ds)
         val en = minOf(s.end ?: now, de)
         if (en > st) Ev(s, tag, st, en) else null
+    }.toMutableList()
+    if (withTasks) {
+        val key = date.toString()
+        d.tasks.filter { !it.done && it.date == key && it.time.length >= 5 }.forEach { t ->
+            val h = t.time.take(2).toIntOrNull()
+            val m = t.time.drop(3).take(2).toIntOrNull()
+            if (h != null && m != null) {
+                val st = ds + h * 3600000L + m * 60000L
+                val color = d.lists.firstOrNull { it.id == t.listId }?.color ?: 6
+                out.add(Ev(Session("task_" + t.id, "task", st, st + 30 * 60000L), Tag("task", t.title, "◻️", "", color), st, st + 30 * 60000L))
+            }
+        }
     }
+    return out
 }
 
 /**

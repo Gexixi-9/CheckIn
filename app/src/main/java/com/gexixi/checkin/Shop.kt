@@ -61,13 +61,13 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import java.io.File
 
-// 商城配色：深蓝灰夜景 + 香槟色点缀，不用红色
-val SHOP_BG_TOP = Color(0xFF232A3D)
-private val SHOP_BG_BOTTOM = Color(0xFF0C0F16)
-private val ACCENT = Color(0xFFE2CC93)
-private val PANEL = Color(0x1FFFFFFF)
-private val PLATE = Color(0xFFF2EBD8)
-private val TEXT_DIM = Color(0xFFB9BFCC)
+// 商城配色：简约黑白，不用彩色
+val SHOP_BG_TOP = Color(0xFF141414)
+private val SHOP_BG_BOTTOM = Color(0xFF000000)
+private val ACCENT = Color.White
+private val PANEL = Color(0x1AFFFFFF)
+private val PLATE = Color.White
+private val TEXT_DIM = Color(0xFFA8A8A8)
 
 private val EMOJI_CHOICES = listOf(
     "🍬", "🍫", "🍪", "🍰", "🧋", "🍿", "🍦", "🍜", "☕", "🥤", "🛍️", "🎮",
@@ -104,7 +104,7 @@ fun ShopScreen() {
                         ) {
                             Text(
                                 n, fontWeight = FontWeight.Medium,
-                                color = if (tab == i) Color(0xFF2A2415) else TEXT_DIM
+                                color = if (tab == i) Color(0xFF111111) else TEXT_DIM
                             )
                         }
                     }
@@ -125,7 +125,7 @@ fun ShopScreen() {
             // 展示柜
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(200.dp).clip(CircleShape).background(Color(0x14FFFFFF)).border(2.dp, Color(0x66E2CC93), CircleShape),
+                    Modifier.size(200.dp).clip(CircleShape).background(Color(0x14FFFFFF)).border(2.dp, Color(0x66FFFFFF), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     when {
@@ -141,7 +141,7 @@ fun ShopScreen() {
                     Modifier.fillMaxWidth(0.78f).clip(RoundedCornerShape(10.dp)).background(PLATE).padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(sel?.name ?: "—", color = Color(0xFF2A2415), fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(sel?.name ?: "—", color = Color(0xFF111111), fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 if (sel != null) {
                     Spacer(Modifier.height(6.dp))
@@ -166,7 +166,7 @@ fun ShopScreen() {
                     if (sel != null && sel.kind == 0 && sel.status == 0) {
                         Text(
                             if (bal >= sel.cost) "够了，可以兑换" else "还差 " + (sel.cost - bal) + " 枚",
-                            color = if (bal >= sel.cost) ACCENT else Color(0xFFB0B6C4), fontSize = 12.sp
+                            color = if (bal >= sel.cost) ACCENT else Color(0xFF9A9A9A), fontSize = 12.sp
                         )
                     }
                 }
@@ -200,18 +200,18 @@ fun ShopScreen() {
                     }
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                            .background(if (isSel) Color(0x33E2CC93) else PANEL)
+                            .background(if (isSel) Color(0x33FFFFFF) else PANEL)
                             .combinedClickable(onClick = { selId = w.id }, onLongClick = { delWish = w })
                             .padding(horizontal = 14.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (w.kind == 0 && w.emoji.isNotBlank()) Text(w.emoji + " ", fontSize = 15.sp)
-                        Text(w.name, Modifier.weight(1f), color = if (isSel) ACCENT else Color(0xFFE6E8EE), maxLines = 1)
+                        Text(w.name, Modifier.weight(1f), color = if (isSel) ACCENT else Color(0xFFE8E8E8), maxLines = 1)
                         if (w.kind == 0) Text(coinIcon() + w.cost + "  ", fontSize = 12.sp, color = TEXT_DIM)
-                        Text(tag, color = if (tag == "可兑换" || tag == "待领取") ACCENT else Color(0xFF8D94A5), fontSize = 12.sp)
+                        Text(tag, color = if (tag == "可兑换" || tag == "待领取") ACCENT else Color(0xFF8A8A8A), fontSize = 12.sp)
                     }
                 }
-                if (list.isEmpty()) item { Text("这里还没有东西。长按商品可以下架。", color = Color(0xFF8D94A5), fontSize = 13.sp) }
+                if (list.isEmpty()) item { Text("这里还没有东西。长按商品可以下架。", color = Color(0xFF8A8A8A), fontSize = 13.sp) }
                 item { Spacer(Modifier.height(16.dp)) }
             }
         }
@@ -234,7 +234,7 @@ private fun SuccessPopup(w: Wish, onClose: () -> Unit) {
     val a = remember { Animatable(0f) }
     LaunchedEffect(w.id) { a.snapTo(0f); a.animateTo(1f, tween(450)) }
     Box(
-        Modifier.fillMaxSize().background(Color(0xDD0C0F16)).graphicsLayer { alpha = a.value }
+        Modifier.fillMaxSize().background(Color(0xEE000000)).graphicsLayer { alpha = a.value }
             .pointerInput(Unit) { detectTapGestures { onClose() } },
         contentAlignment = Alignment.Center
     ) {
@@ -246,7 +246,7 @@ private fun SuccessPopup(w: Wish, onClose: () -> Unit) {
             Text("✦  ✦ ✦", color = ACCENT, fontSize = 16.sp)
             Spacer(Modifier.height(18.dp))
             if (w.photo.isNotEmpty()) {
-                Box(Modifier.size(230.dp).clip(CircleShape).border(2.dp, Color(0x88E2CC93), CircleShape)) {
+                Box(Modifier.size(230.dp).clip(CircleShape).border(2.dp, Color(0x88FFFFFF), CircleShape)) {
                     AsyncImage(File(w.photo), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 }
                 Spacer(Modifier.height(12.dp))
@@ -260,11 +260,11 @@ private fun SuccessPopup(w: Wish, onClose: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(14.dp))
-            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF3A4668)).padding(horizontal = 18.dp, vertical = 6.dp)) {
+            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF2A2A2A)).padding(horizontal = 18.dp, vertical = 6.dp)) {
                 Text("成交价：" + coinIcon() + " " + w.cost, color = Color.White, fontWeight = FontWeight.Medium)
             }
             Spacer(Modifier.height(24.dp))
-            Text("点任意处关闭", color = Color(0xFF8D94A5), fontSize = 12.sp)
+            Text("点任意处关闭", color = Color(0xFF8A8A8A), fontSize = 12.sp)
         }
     }
 }
@@ -339,7 +339,7 @@ fun WishDialog(onDismiss: () -> Unit, onSave: (Wish) -> Unit) {
                 if (name.isNotBlank()) {
                     onSave(Wish(name = name.trim(), cost = cost.toIntOrNull() ?: 9, stars = stars, photo = photo, emoji = emoji.ifBlank { "🍬" }))
                 }
-            }) { Text("上架", color = C.red) }
+            }) { Text("上架", color = C.accent) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )

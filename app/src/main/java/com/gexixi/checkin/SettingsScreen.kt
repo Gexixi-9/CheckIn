@@ -91,6 +91,29 @@ fun SettingsPage(onBack: () -> Unit) {
             catch (e: Exception) { Toast.makeText(ctx, "导出失败：" + e.message, Toast.LENGTH_LONG).show() }
         }
     }
+    var pendingImport by remember { mutableStateOf<Uri?>(null) }
+    val importPick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) pendingImport = uri
+    }
+    pendingImport?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingImport = null },
+            title = { Text("导入这个备份？") },
+            text = { Text("会用备份里的内容覆盖现在手机上的全部数据和设置（包括 API 密钥）。建议先导出一份现在的。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingImport = null
+                    try {
+                        val n = Repo.importBackup(ctx, uri)
+                        Toast.makeText(ctx, "已恢复（" + n + " 个文件）", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(ctx, "导入失败：" + (e.message ?: ""), Toast.LENGTH_LONG).show()
+                    }
+                }) { Text("覆盖导入", color = C.red) }
+            },
+            dismissButton = { TextButton(onClick = { pendingImport = null }) { Text("取消") } }
+        )
+    }
     BentoPage(header = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color.White).bounceClick(onClick = onBack), contentAlignment = Alignment.Center) {
@@ -130,8 +153,10 @@ fun SettingsPage(onBack: () -> Unit) {
         BentoRow {
             Bento(Modifier.size(cell), color = soft(2, 0.3f), title = "备份", detail = {
                 Body {
-                    Text("把数据、日记、记录里的照片、商品图片打成一个压缩包。", fontSize = 13.sp, color = C.gray)
+                    Text("打成一个压缩包，包含：全部数据、日记、记录里的照片和录音、商品图片、人物照片，还有设置里填的所有东西——AI 和语音的 API 密钥、自动记录的 App 对应表、Notion 链接、金币设置。", fontSize = 13.sp, color = C.ink)
+                    Text("注意：压缩包里有 API 密钥，别发给别人。", fontSize = 12.sp, color = C.gray)
                     RippleButton("导出备份", { export.launch("dangxia-backup.zip") }, filled = true)
+                    RippleButton("导入备份（换手机 / 重装后用）", { importPick.launch(arrayOf("application/zip", "application/octet-stream")) })
                 }
             }) { SettingCardText("💾", "备份", "导出压缩包") }
             Spacer(Modifier.size(cell))
@@ -222,7 +247,7 @@ private fun AutoSettings() {
     Body {
         Section("自动记录 App 使用")
         SwitchRow("打开对应 App 自动计时，退出自动结束（不发金币、不播语音）", p.autoOn) { v -> Repo.setPrefs { it.copy(autoOn = v) } }
-        Text(if (hasUsage) "使用情况访问权限：已开启 ✓" else "使用情况访问权限：还没开，需要手动开一次", fontSize = 13.sp, color = if (hasUsage) C.gray else C.red)
+        Text(if (hasUsage) "使用情况访问权限：已开启 ✓" else "使用情况访问权限：还没开，需要手动开一次", fontSize = 13.sp, color = if (hasUsage) C.gray else C.accent)
         RippleButton("去开「使用情况访问权限」", { ctx.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
         RippleButton("对应表：哪个 App 记到哪个标签（已设 " + p.autoMap.size + " 个）", { showMap = true })
         NumRow("少于几分钟的不记录", p.minMin) { v -> Repo.setPrefs { it.copy(minMin = v.coerceAtLeast(1)) } }
@@ -291,7 +316,7 @@ private fun AppMapDialog(onDismiss: () -> Unit) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(label, Modifier.weight(1f), fontSize = 14.sp)
                         Box {
-                            TextButton(onClick = { open = pkg }) { Text(if (tag != null) tag.emoji + tag.name else "不记录", color = if (tag != null) C.red else C.gray) }
+                            TextButton(onClick = { open = pkg }) { Text(if (tag != null) tag.emoji + tag.name else "不记录", color = if (tag != null) C.accent else C.gray) }
                             DropdownMenu(expanded = open == pkg, onDismissRequest = { open = "" }) {
                                 DropdownMenuItem(text = { Text("不记录") }, onClick = {
                                     Repo.setPrefs { p -> p.copy(autoMap = p.autoMap.filter { it.pkg != pkg }) }; open = ""

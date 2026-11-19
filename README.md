@@ -1,6 +1,6 @@
-# 当下 v2（原生安卓，Kotlin + Jetpack Compose）
+# 当下 v3（原生安卓，Kotlin + Jetpack Compose）
 
-在 Dangxia-v1 基础上改的第二版。包名、数据文件不变，直接覆盖安装，旧数据会自动升级（标签、记录、任务、商品、金币都保留）。
+在 Dangxia-v1 基础上改的第三版。包名、数据文件不变，直接覆盖安装，旧数据会自动升级（标签、记录、任务、商品、金币都保留）。
 
 ## 用 GitHub 自动编译 APK
 推到仓库后，Actions → Build APK → 下载 Artifacts 里的 app-debug.apk。
@@ -14,3 +14,4 @@
 - `Tracker.kt` 后台服务（自动记录，少于 5 分钟不记，1 分钟内切回算同一段）　`Widgets.kt` 三个桌面小组件
 - `Ai.kt` DeepSeek 状态目标拆分 / 自动填写 / 结算　`Media.kt` 鼓励音频 + 播报　`Notion.kt` 一键跳转
 - 密钥只在设置页填，存手机本地，源码里没有。
+- `PeoplePage.kt` 人物界面（规划页右边）　`ToggleActivity.kt` 桌面标签小组件结束后跳 Notion / repov 的透明中转页

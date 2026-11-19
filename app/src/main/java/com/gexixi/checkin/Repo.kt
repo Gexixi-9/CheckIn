@@ -59,6 +59,10 @@ object Repo {
             val extra = defaultAutoMap().filter { m -> m.pkg !in have && d.tags.any { it.id == m.tagId } }
             d = d.copy(prefs = p.copy(coin = "🪙", minMin = 5, autoMap = p.autoMap + extra), ver = 2)
         }
+        if (d.ver < 3) {
+            val sys = defaultTags().filter { it.hidden() && d.tags.none { x -> x.id == it.id } }
+            d = d.copy(tags = d.tags + sys, groups = if (d.groups.isEmpty()) defaultGroups() else d.groups, ver = 3)
+        }
         return d
     }
 
@@ -169,6 +173,69 @@ object Repo {
         }
         return out.take(10)
     }
+
+    // ---- 标签分组（可增减、改名、改颜色） ----
+    fun addGroup(g: GroupDef) { update { it.copy(groups = it.groups + g) } }
+
+    fun updateGroup(old: String, g: GroupDef) {
+        update { d ->
+            d.copy(
+                groups = d.groups.map { if (it.name == old) g else it },
+                tags = d.tags.map { if (it.group == old) it.copy(group = g.name) else it },
+                widgetGroup = if (d.widgetGroup == old) g.name else d.widgetGroup
+            )
+        }
+        Widgets.refreshAll(app)
+    }
+
+    /** 删掉分组：里面的标签挪到第一个剩下的分组，不会丢记录 */
+    fun deleteGroup(name: String) {
+        update { d ->
+            val rest = d.groups.filter { it.name != name }
+            if (rest.isEmpty()) d
+            else d.copy(
+                groups = rest,
+                tags = d.tags.map { if (it.group == name) it.copy(group = rest.first().name) else it },
+                widgetGroup = if (d.widgetGroup == name) rest.first().name else d.widgetGroup
+            )
+        }
+        Widgets.refreshAll(app)
+    }
+
+    // ---- 番茄钟（专注计时）：点一下开始，再点一下结束并填「这是干什么的」，写进日历 ----
+    fun startStopwatch() { update { it.copy(stopwatchStart = System.currentTimeMillis()) } }
+    fun cancelStopwatch() { update { it.copy(stopwatchStart = 0L) } }
+
+    fun finishStopwatch(tagId: String, title: String, note: String) {
+        val st = data.stopwatchStart
+        if (st == 0L) return
+        val en = System.currentTimeMillis()
+        val tg = if (tag(tagId) != null) tagId else "x_focus"
+        update { d ->
+            d.copy(
+                sessions = d.sessions + Session(uid(), tg, st, en, false, note.trim(), emptyList(), "", "", title.trim()).copy(audio = ""),
+                stopwatchStart = 0L
+            )
+        }
+        Widgets.refreshAll(app)
+    }
+
+    /** 日历底栏「文字 / 录音」：在当下这个时间写入日历一条即时记录 */
+    fun addMoment(note: String, audio: String, start: Long = System.currentTimeMillis(), end: Long = start + 60000L): String {
+        val s = Session(uid(), "x_note", start, end, false, note, emptyList(), audio)
+        update { it.copy(sessions = it.sessions + s) }
+        Widgets.refreshAll(app)
+        return s.id
+    }
+
+    // ---- 人物界面 ----
+    fun bumpPlay(ch: String) {
+        if (ch.isBlank()) return
+        update { d -> d.copy(charPlays = d.charPlays + (ch to ((d.charPlays[ch] ?: 0) + 1))) }
+    }
+
+    fun setCharPhoto(ch: String, path: String) { update { d -> d.copy(charPhotos = d.charPhotos + (ch to path)) } }
+    fun clearCharPhoto(ch: String) { update { d -> d.copy(charPhotos = d.charPhotos - ch) } }
 
     fun setShopOpen(b: Boolean) { update { it.copy(shopOpen = b) } }
 
@@ -383,8 +450,61 @@ object Repo {
                 File(app.filesDir, "wishes").walkTopDown().filter { it.isFile }.forEach {
                     add(it, "wishes/" + it.relativeTo(File(app.filesDir, "wishes")).path)
                 }
+                File(app.filesDir, "people").walkTopDown().filter { it.isFile }.forEach {
+                    add(it, "people/" + it.relativeTo(File(app.filesDir, "people")).path)
+                }
                 app.filesDir.listFiles()?.filter { it.isFile && it.name.startsWith("wish_") }?.forEach { add(it, "wishes/" + it.name) }
             }
         }
+    }
+
+    /**
+     * 导入备份（导出的压缩包）：恢复数据、日记、照片、录音，设置（含 API 密钥、自动记录对应表）一起恢复。
+     * 图片路径是旧手机的绝对路径，这里按文件名重新指到新位置。返回恢复了多少个文件。
+     */
+    fun importBackup(ctx: Context, uri: Uri): Int {
+        val root = app.filesDir
+        val byName = HashMap<String, File>()
+        var json: String? = null
+        var n = 0
+        ctx.contentResolver.openInputStream(uri)?.use { ins ->
+            java.util.zip.ZipInputStream(ins).use { z ->
+                var e = z.nextEntry
+                while (e != null) {
+                    if (!e.isDirectory) {
+                        if (e.name == "dangxia.json") {
+                            json = z.readBytes().toString(Charsets.UTF_8)
+                        } else {
+                            val dest = File(root, e.name)
+                            if (dest.canonicalPath.startsWith(root.canonicalPath)) {
+                                dest.parentFile?.mkdirs()
+                                dest.outputStream().use { z.copyTo(it) }
+                                byName[dest.name] = dest
+                                n++
+                            }
+                        }
+                    }
+                    e = z.nextEntry
+                }
+            }
+        }
+        val text = json ?: throw Exception("这个压缩包里没有 dangxia.json，不是备份文件")
+        val loaded = Gson().fromJson(text, Data::class.java) ?: throw Exception("备份文件读不出来")
+        fun fix(p: String): String {
+            if (p.isBlank()) return p
+            val rel = p.substringAfter("/files/", "")
+            if (rel.isNotBlank() && File(root, rel).exists()) return File(root, rel).path
+            return byName[File(p).name]?.path ?: p
+        }
+        val fixed = loaded.copy(
+            wishes = loaded.wishes.map { it.copy(photo = fix(it.photo)) },
+            sessions = loaded.sessions.map { it.copy(photos = it.photos.map { p -> fix(p) }, audio = fix(it.audio)) },
+            diary = loaded.diary.map { it.copy(files = it.files.map { p -> fix(p) }) },
+            charPhotos = loaded.charPhotos.mapValues { fix(it.value) }
+        )
+        data = normalize(fixed)
+        try { file.writeText(Gson().toJson(data)) } catch (_: Exception) {}
+        afterChange()
+        return n
     }
 }

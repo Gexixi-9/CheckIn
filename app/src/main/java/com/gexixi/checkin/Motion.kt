@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -84,7 +85,7 @@ fun Modifier.bounceClick(
 
 // ---------------- 弹性开关：滑块移动过程中横向拉伸到 1.35 倍，到位后弹簧收回（刚度200 阻尼14），底色 280ms 渐变 ----------------
 @Composable
-fun ElasticSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier, onColor: Color = C.red) {
+fun ElasticSwitch(checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier, onColor: Color = C.accent) {
     val pos by animateFloatAsState(if (checked) 1f else 0f, springF(200f, 14f), label = "knob")
     val track by animateColorAsState(if (checked) onColor else Color(0xFFCFCFCB), tween(280), label = "track")
     val mid = (4f * pos * (1f - pos)).coerceIn(0f, 1f)
@@ -180,7 +181,7 @@ fun Modifier.magnetic(): Modifier {
 @Composable
 fun RedeemButton(
     label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier,
-    accent: Color = Color(0xFFE2CC93)
+    accent: Color = Color.White
 ) {
     val scale = remember { Animatable(1f) }
     val burst = remember { Animatable(0f) }
@@ -215,7 +216,7 @@ fun RedeemButton(
                 .padding(horizontal = 26.dp, vertical = 14.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(label, color = if (enabled) Color(0xFF2A2415) else Color(0x88FFFFFF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = if (enabled) Color(0xFF111111) else Color(0x88FFFFFF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
         Text(
             "+1", color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold,

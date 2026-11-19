@@ -19,6 +19,7 @@ data class Session(
     val auto: Boolean = false,
     val note: String = "",                       // 当时的所思所感
     val photos: List<String> = emptyList(),      // 当时的照片（拍的或相册选的）
+    val audio: String = "",                      // 当时的录音文件（日历底栏「录音」）
     val emoji: String = "",                      // 单条记录改过的图标（空 = 用标签的）
     val title: String = ""                       // 单条记录改过的名称（空 = 用标签的）
 )
@@ -108,24 +109,24 @@ data class Prefs(
     val notion: List<NotionLink> = defaultNotion()
 )
 
-val GROUPS = listOf("生活", "护理", "工作", "社交", "娱乐", "考研", "论文")
-val ALL_GROUPS = GROUPS + listOf("手机")
+/** 标签分组：名称、英文名（展开时显示）、代表图标、颜色，都可以在 App 里增减修改 */
+data class GroupDef(val name: String = "", val en: String = "", val emoji: String = "⭐", val color: Int = 11)
 
-/** 分组的英文名、代表图标、代表色（标签组展开时用） */
-fun groupEn(g: String): String = when (g) {
-    "生活" -> "Life"; "护理" -> "Care"; "工作" -> "Work"; "社交" -> "Social"
-    "娱乐" -> "Fun"; "考研" -> "Study"; "论文" -> "Thesis"; "手机" -> "Phone"; else -> g
-}
+fun defaultGroups(): List<GroupDef> = listOf(
+    GroupDef("生活", "Life", "🏠", 4), GroupDef("护理", "Care", "🧴", 10), GroupDef("工作", "Work", "💼", 6),
+    GroupDef("社交", "Social", "👥", 8), GroupDef("娱乐", "Fun", "🎮", 7), GroupDef("考研", "Study", "📚", 2),
+    GroupDef("论文", "Thesis", "📝", 5), GroupDef("手机", "Phone", "📱", 0)
+)
 
-fun groupEmoji(g: String): String = when (g) {
-    "生活" -> "🏠"; "护理" -> "🧴"; "工作" -> "💼"; "社交" -> "👥"
-    "娱乐" -> "🎮"; "考研" -> "📚"; "论文" -> "📝"; "手机" -> "📱"; else -> "⭐"
-}
+fun groupDefOf(g: String): GroupDef =
+    Repo.data.groups.firstOrNull { it.name == g } ?: defaultGroups().firstOrNull { it.name == g } ?: GroupDef(g, g, "⭐", 11)
 
-fun groupColor(g: String): Int = when (g) {
-    "生活" -> 4; "护理" -> 10; "工作" -> 6; "社交" -> 8
-    "娱乐" -> 7; "考研" -> 2; "论文" -> 5; "手机" -> 0; else -> 11
-}
+fun groupEn(g: String): String = groupDefOf(g).en.ifBlank { g }
+fun groupEmoji(g: String): String = groupDefOf(g).emoji
+fun groupColor(g: String): Int = groupDefOf(g).color
+
+/** x_ 开头的是系统用的标签（日历底栏的即时记录、专注计时），不在标签格里显示 */
+fun Tag.hidden(): Boolean = id.startsWith("x_")
 
 val STATE_NAMES = listOf("未设", "高压·高能", "高压·低能", "低压·低能", "低压·高能")
 val STATE_HINTS = listOf(
@@ -195,6 +196,8 @@ fun defaultTags(): List<Tag> = listOf(
     t("k_review", "复习考试", "📚", "考研", 2), t("k_homework", "做功课", "✍️", "考研", 2),
     t("k_skill", "学新技能", "🎓", "考研", 2),
     t("p_write", "写论文", "📝", "论文", 7),
+    // 系统用（不在标签格里显示）
+    t("x_note", "即时记录", "💭", "生活", 11), t("x_focus", "专注计时", "⏱️", "生活", 11),
     // 手机（自动记录用，也可以手动点）
     t("a_douyin", "刷抖音", "🎵", "手机", 0), t("a_xhs", "刷小红书", "📕", "手机", 0),
     t("a_bili", "刷B站", "📺", "手机", 0), t("a_wechat", "微信", "💬", "手机", 0),
@@ -229,6 +232,10 @@ data class Data(
     val widgetGroup: String = "生活",
     val sumOffset: Int = 0,
     val weather: Map<String, String> = emptyMap(),   // 日期 → 天气 emoji（手动选）
+    val groups: List<GroupDef> = defaultGroups(),
+    val stopwatchStart: Long = 0L,                   // 番茄钟（专注计时）开始时间，0 = 没在计时
+    val charPhotos: Map<String, String> = emptyMap(),// 人物界面里换的照片
+    val charPlays: Map<String, Int> = emptyMap(),    // 每个角色的鼓励音频播放次数（♥ 数）
     val shopOpen: Boolean = false,                   // 商城开关卡的状态
     val ver: Int = 0
 )

@@ -12,7 +12,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
-import android.text.TextPaint
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.View
@@ -40,6 +39,11 @@ object Widgets {
         extras.forEach { i.putExtra(it.first, it.second) }
         val req = (action + extras.joinToString("|") { it.second }).hashCode()
         return PendingIntent.getBroadcast(ctx, req, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    fun togglePi(ctx: Context, tagId: String): PendingIntent {
+        val i = Intent(ctx, ToggleActivity::class.java).putExtra("tag", tagId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        return PendingIntent.getActivity(ctx, ("tg" + tagId).hashCode(), i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     fun settlePi(ctx: Context, taskId: String): PendingIntent {
@@ -112,14 +116,18 @@ class TagWidget : AppWidgetProvider() {
         fun build(ctx: Context): RemoteViews {
             val d = Repo.data
             val rv = RemoteViews(ctx.packageName, R.layout.widget_tags)
-            GROUPS.forEachIndexed { i, g ->
+            val groupNames = d.groups.map { it.name }
+            for (i in gids.indices) {
+                val g = groupNames.getOrNull(i)
+                if (g == null) { rv.setViewVisibility(gids[i], View.GONE); continue }
+                rv.setViewVisibility(gids[i], View.VISIBLE)
                 val sel = g == d.widgetGroup
                 rv.setTextViewText(gids[i], g)
                 rv.setTextColor(gids[i], if (sel) 0xFF1E1E1E.toInt() else 0xFF8E9093.toInt())
                 rv.setTextViewTextSize(gids[i], TypedValue.COMPLEX_UNIT_SP, if (sel) 15f else 12f)
                 rv.setOnClickPendingIntent(gids[i], Widgets.pi(ctx, TagWidget::class.java, ACTION_GROUP, "group" to g))
             }
-            val tags = d.tags.filter { it.group == d.widgetGroup }.take(9)
+            val tags = d.tags.filter { it.group == d.widgetGroup && !it.hidden() }.take(9)
             for (i in cells.indices) {
                 val tag = tags.getOrNull(i)
                 if (tag == null) { rv.setViewVisibility(cells[i], View.INVISIBLE); continue }
@@ -135,7 +143,12 @@ class TagWidget : AppWidgetProvider() {
                     rv.setChronometer(chrs[i], SystemClock.elapsedRealtime(), null, false)
                     rv.setViewVisibility(chrs[i], View.GONE)
                 }
-                rv.setOnClickPendingIntent(cells[i], Widgets.pi(ctx, TagWidget::class.java, ACTION_TOGGLE, "tag" to tag.id))
+                // 结束后要跳 Notion / repov 的标签，点击走一个透明中转页（广播接收器没法直接打开别的 App）
+                val jump = notionKeyFor(tag.id).isNotEmpty() || tag.repov
+                rv.setOnClickPendingIntent(
+                    cells[i],
+                    if (jump) Widgets.togglePi(ctx, tag.id) else Widgets.pi(ctx, TagWidget::class.java, ACTION_TOGGLE, "tag" to tag.id)
+                )
             }
             return rv
         }
@@ -187,7 +200,7 @@ class DayWidget : AppWidgetProvider() {
         private fun errorBitmap(msg: String): Bitmap {
             val b = Bitmap.createBitmap(600, 300, Bitmap.Config.ARGB_8888)
             val c = Canvas(b)
-            val p = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 28f }
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 28f }
             c.drawText(TextUtils.ellipsize(msg, p, 560f, TextUtils.TruncateAt.END).toString(), 20f, 150f, p)
             return b
         }
@@ -200,7 +213,7 @@ class DayWidget : AppWidgetProvider() {
             val ds = Repo.dayStart(date)
             val now = System.currentTimeMillis()
             val evs = dayEvents(d, date, now)
-            val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 30f; typeface = Typeface.DEFAULT_BOLD }
+            val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); typeface = Typeface.DEFAULT_BOLD }
             val gray = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 22f }
             val fill = Paint(Paint.ANTI_ALIAS_FLAG)
             val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE4E4DE.toInt(); strokeWidth = 2f }
@@ -221,7 +234,7 @@ class DayWidget : AppWidgetProvider() {
             }
             val top = 84f
             val pxH = (H - top - 12f) / (endH - startH)
-            assignLanes(evs, (44f / pxH * 3600000f).toLong())
+            assignLanes(evs, (56f / pxH * 3600000f).toLong())     // 块最矮 56px，上下相邻不压
             val left = 64f
             val w = W - left - 14f
             gray.textAlign = Paint.Align.LEFT
@@ -230,51 +243,98 @@ class DayWidget : AppWidgetProvider() {
                 c.drawLine(left, y, W - 8f, y, line)
                 if (h < 24) c.drawText("%02d".format(h), 10f, y + 8f, gray)
             }
-            val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 25f }
+            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 26f; typeface = Typeface.DEFAULT_BOLD }
+            val sp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x991E1E1E.toInt(); textSize = 21f }
             val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC1E1E1E.toInt(); textSize = 22f }
+            val thumb = 52f
             evs.forEach { e ->
                 val y0 = top + ((e.st - ds) / 3600000f - startH) * pxH
-                val y1 = top + ((e.vEn - ds) / 3600000f - startH) * pxH - 2f
+                val y1 = top + ((e.vEn - ds) / 3600000f - startH) * pxH - 3f
                 val lw = w / e.lanes
                 val x0 = left + e.lane * lw
-                val x1 = x0 + lw - 4f
+                val x1 = x0 + lw - 5f
                 val col = pint(e.tag.color)
-                fill.color = (col and 0x00FFFFFF) or (0x55 shl 24)
-                c.drawRoundRect(RectF(x0, y0, x1, y1), 10f, 10f, fill)
+                if (e.isTask) {
+                    // 有具体时间的待办：白底圆角 + 空心圆
+                    fill.style = Paint.Style.FILL
+                    fill.color = 0xFFFFFFFF.toInt()
+                    c.drawRoundRect(RectF(x0, y0, x1, y1), 14f, 14f, fill)
+                    fill.style = Paint.Style.STROKE
+                    fill.strokeWidth = 3f
+                    fill.color = (col and 0x00FFFFFF) or (0x99 shl 24)
+                    c.drawRoundRect(RectF(x0, y0, x1, y1), 14f, 14f, fill)
+                    fill.strokeWidth = 4f
+                    val cy = (y0 + y1) / 2f
+                    c.drawCircle(x0 + 28f, cy, 12f, fill)
+                    fill.style = Paint.Style.FILL
+                    val tw0 = x1 - x0 - 60f
+                    c.drawText(TextUtils.ellipsize(e.name, tp, tw0, TextUtils.TruncateAt.END).toString(), x0 + 52f, cy + 9f, tp)
+                    return@forEach
+                }
+                // 时间段色块：浅色底 + 左边深色条，圆角（和 App 里一致，不再是方的）
+                fill.style = Paint.Style.FILL
+                fill.color = (col and 0x00FFFFFF) or (0x38 shl 24)
+                c.drawRoundRect(RectF(x0, y0, x1, y1), 14f, 14f, fill)
                 fill.color = col or (0xFF shl 24)
-                c.drawRoundRect(RectF(x0, y0, x0 + 7f, y1), 4f, 4f, fill)
-                val tw = x1 - x0 - 22f
-                val head = e.emoji + e.name + " | " + fmtMin(e.en - e.st)
-                var ty = y0 + 28f
-                if (y1 - y0 >= 34f) c.drawText(TextUtils.ellipsize(head, tp, tw, TextUtils.TruncateAt.END).toString(), x0 + 16f, ty, tp)
-                if (e.s.note.isNotBlank() && y1 - y0 > 70f) {
-                    ty += 28f
-                    val maxLines = ((y1 - ty) / 26f).toInt().coerceIn(0, 4)
+                val bar = android.graphics.Path()
+                bar.addRoundRect(RectF(x0, y0, x0 + 14f, y1), 14f, 14f, android.graphics.Path.Direction.CW)
+                c.save()
+                c.clipRect(x0, y0, x0 + 8f, y1)
+                c.drawPath(bar, fill)
+                c.restore()
+                val tx = x0 + 22f
+                val tw = x1 - tx - 8f
+                var cy = y0 + 12f                                  // 当前写到哪一行的上沿
+                val h = y1 - y0
+                // 第一行：图标 + 名称（块太矮时把时长接在后面）
+                val head = e.emoji + " " + e.name + (if (e.s.audio.isNotBlank()) " 🎙" else "") + (if (h < 84f) " | " + fmtMin(e.en - e.st) else "")
+                if (h >= 40f) {
+                    c.drawText(TextUtils.ellipsize(head, tp, tw, TextUtils.TruncateAt.END).toString(), tx, cy + 22f, tp)
+                    cy += 32f
+                }
+                // 第二行：时间范围 · 时长
+                if (h >= 84f) {
+                    val tr = hm(e.st) + " – " + (if (e.s.end == null) "进行中" else hm(e.en)) + " · " + fmtMin(e.en - e.st)
+                    c.drawText(TextUtils.ellipsize(tr, sp, tw, TextUtils.TruncateAt.END).toString(), tx, cy + 16f, sp)
+                    cy += 30f
+                }
+                // 所思所感：每行都按剩下的空间算，给照片留位置
+                val hasPh = e.s.photos.isNotEmpty()
+                val reserve = if (hasPh) thumb + 14f else 0f
+                if (e.s.note.isNotBlank() && h >= 120f) {
                     var rest = e.s.note.replace("\n", " ")
-                    var n = 0
-                    while (n < maxLines && rest.isNotEmpty()) {
+                    while (rest.isNotEmpty() && cy + 28f <= y1 - reserve - 6f) {
                         val cnt = np.breakText(rest, true, tw, null).coerceAtLeast(1)
-                        c.drawText(rest.substring(0, cnt), x0 + 16f, ty, np)
+                        c.drawText(rest.substring(0, cnt), tx, cy + 20f, np)
                         rest = rest.substring(cnt)
-                        ty += 26f
-                        n++
+                        cy += 28f
                     }
                 }
-                if (e.s.photos.isNotEmpty() && y1 - ty > 90f) {
-                    val th = decodeThumb(e.s.photos.first(), 320)
-                    if (th != null) {
-                        val availH = (y1 - ty - 8f).coerceAtMost(330f)
-                        val sc = minOf(tw / th.width, availH / th.height)
-                        val pw = th.width * sc
-                        val ph = th.height * sc
-                        c.drawBitmap(th, null, RectF(x0 + 16f, ty, x0 + 16f + pw, ty + ph), null)
+                // 照片：统一小尺寸圆角方块，排在文字下面，间隔固定，不压字
+                if (hasPh && cy + thumb + 8f <= y1) {
+                    var px = tx
+                    e.s.photos.take(3).forEach { p ->
+                        val th = decodeThumb(p, 160)
+                        if (th != null) {
+                            val side = minOf(th.width, th.height)
+                            val src = android.graphics.Rect((th.width - side) / 2, (th.height - side) / 2, (th.width + side) / 2, (th.height + side) / 2)
+                            val dst = RectF(px, cy + 6f, px + thumb, cy + 6f + thumb)
+                            val path = android.graphics.Path()
+                            path.addRoundRect(dst, 12f, 12f, android.graphics.Path.Direction.CW)
+                            c.save()
+                            c.clipPath(path)
+                            c.drawBitmap(th, src, dst, null)
+                            c.restore()
+                            px += thumb + 8f
+                        }
                     }
                 }
             }
             if (date == LocalDate.now()) {
                 val y = top + ((now - ds) / 3600000f - startH) * pxH
                 if (y in top..(H - 4f)) {
-                    fill.color = 0xFFE0143C.toInt()
+                    fill.style = Paint.Style.FILL
+                    fill.color = 0xFF1E1E1E.toInt()
                     c.drawRect(left, y - 1.5f, W - 8f, y + 1.5f, fill)
                     c.drawCircle(left, y, 7f, fill)
                 }

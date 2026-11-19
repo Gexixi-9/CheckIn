@@ -25,4 +25,13 @@ object Notion {
             catch (e2: Exception) { Toast.makeText(ctx, "打不开 Notion", Toast.LENGTH_SHORT).show() }
         }
     }
+
+    /** 跳 repov 记录：先把「标签名 + 用时」复制好 */
+    fun openRepov(ctx: Context, clip: String) {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("repov", clip))
+        val i = ctx.packageManager.getLaunchIntentForPackage("com.kilo.repov")
+        if (i != null) ctx.startActivity(i)
+        else Toast.makeText(ctx, "没找到 repov（已复制：标签名+用时）", Toast.LENGTH_LONG).show()
+    }
 }

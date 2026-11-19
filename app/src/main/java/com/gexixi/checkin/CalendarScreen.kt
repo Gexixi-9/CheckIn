@@ -2,10 +2,14 @@
 
 package com.gexixi.checkin
 
+import android.Manifest
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.os.ParcelFileDescriptor
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -25,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -69,29 +74,72 @@ fun Modifier.pinchZoom(onZoom: (Float) -> Unit): Modifier = this.pointerInput(Un
     }
 }
 
+private fun dateTitle(date: LocalDate, month: Boolean): String =
+    if (month) "" + date.year + "年" + date.monthValue + "月"
+    else "" + date.monthValue + "月" + date.dayOfMonth + "日 周" + "一二三四五六日"[date.dayOfWeek.value - 1]
+
 // ============================ 日历：什么时间段完成了什么，同时发生的左右错开 ============================
 @Composable
 fun CalendarScreen() {
     var date by remember { mutableStateOf(LocalDate.now()) }
     var month by remember { mutableStateOf(false) }
     var pickWeather by remember { mutableStateOf(false) }
+    var sheetId by remember { mutableStateOf<String?>(null) }
+    var newTask by remember { mutableStateOf(false) }
+    var editTaskId by remember { mutableStateOf<String?>(null) }
     val weather = Repo.data.weather[date.toString()]
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { date = if (month) date.minusMonths(1) else date.minusDays(1) }) { Text("‹", fontSize = 24.sp, color = C.ink) }
-            Text(
-                if (month) "" + date.year + "年" + date.monthValue + "月" else "" + date.monthValue + "月" + date.dayOfMonth + "日  周" + "一二三四五六日"[date.dayOfWeek.value - 1],
-                Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = C.ink
-            )
-            TextButton(onClick = { date = if (month) date.plusMonths(1) else date.plusDays(1) }) { Text("›", fontSize = 24.sp, color = C.ink) }
-            // 天气图标：点一下选这一天的天气
-            Box(Modifier.size(36.dp).clip(CircleShape).clickable { pickWeather = true }, contentAlignment = Alignment.Center) {
-                Text(weather ?: "☁️", fontSize = 20.sp, modifier = Modifier.graphicsLayer { alpha = if (weather == null) 0.35f else 1f })
+    // 日期放到顶部 Today 旁边（顶栏右侧），下面一行只留翻页和切换
+    val slot = LocalHeaderSlot.current
+    val title = dateTitle(date, month)
+    SideEffect {
+        slot.value = { Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = C.ink, maxLines = 1, softWrap = false) }
+    }
+    DisposableEffect(Unit) { onDispose { slot.value = null } }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TextButton(onClick = { date = if (month) date.minusMonths(1) else date.minusDays(1) }) { Text("‹", fontSize = 24.sp, color = C.ink) }
+                // 天气图标：点一下选这一天的天气
+                Box(Modifier.size(36.dp).clip(CircleShape).clickable { pickWeather = true }, contentAlignment = Alignment.Center) {
+                    Text(weather ?: "☁️", fontSize = 20.sp, modifier = Modifier.graphicsLayer { alpha = if (weather == null) 0.35f else 1f })
+                }
+                TextButton(onClick = { date = LocalDate.now() }) { Text("今天", color = C.ink, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { month = !month }) { Text(if (month) "日" else "月", color = C.ink) }
+                TextButton(onClick = { date = if (month) date.plusMonths(1) else date.plusDays(1) }) { Text("›", fontSize = 24.sp, color = C.ink) }
             }
-            TextButton(onClick = { date = LocalDate.now() }) { Text("今天", color = C.red) }
-            TextButton(onClick = { month = !month }) { Text(if (month) "日" else "月", color = C.gray) }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (month) MonthGrid(date) { date = it; month = false }
+                else DayView(date, onOpen = { sheetId = it }, onEditTask = { editTaskId = it })
+            }
         }
-        if (month) MonthGrid(date) { date = it; month = false } else DayView(date)
+        if (!month) {
+            MomentBar(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                onOpen = { sheetId = it },
+                onTask = { newTask = true }
+            )
+        }
+    }
+    sheetId?.let { id ->
+        SessionSheet(id) {
+            // 点了「文字」却什么都没写，就不留空记录
+            val s = Repo.data.sessions.firstOrNull { it.id == id }
+            if (s != null && s.tagId == "x_note" && s.note.isBlank() && s.audio.isBlank() && s.photos.isEmpty()) Repo.deleteSession(id)
+            sheetId = null
+        }
+    }
+    if (newTask) {
+        TaskEditor(
+            null, { newTask = false }, presetDate = LocalDate.now().toString(), presetTime = java.time.LocalTime.now().let { "%02d:%02d".format(it.hour, it.minute) }
+        ) { Repo.addTask(it); newTask = false }
+    }
+    editTaskId?.let { id ->
+        val t = Repo.data.tasks.firstOrNull { it.id == id }
+        if (t != null) TaskEditor(t, { editTaskId = null }) { Repo.updateTask(it); editTaskId = null } else editTaskId = null
     }
     if (pickWeather) {
         AlertDialog(
@@ -119,8 +167,95 @@ fun CalendarScreen() {
     }
 }
 
+/** 日历底栏：文字 / 录音 / 待办。点了就在「当下这个时间」写进日历 */
 @Composable
-fun DayView(date: LocalDate) {
+private fun MomentBar(modifier: Modifier, onOpen: (String) -> Unit, onTask: () -> Unit) {
+    val ctx = LocalContext.current
+    var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var recFile by remember { mutableStateOf<File?>(null) }
+    var recStart by remember { mutableLongStateOf(0L) }
+    val now by produceState(System.currentTimeMillis(), recorder) {
+        while (true) { value = System.currentTimeMillis(); delay(500) }
+    }
+
+    fun begin() {
+        try {
+            val dir = File(ctx.filesDir, "notes")
+            dir.mkdirs()
+            val f = File(dir, "rec_" + uid() + ".m4a")
+            val r = MediaRecorder()
+            r.setAudioSource(MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            r.setOutputFile(f.absolutePath)
+            r.prepare()
+            r.start()
+            recorder = r; recFile = f; recStart = System.currentTimeMillis()
+        } catch (e: Exception) {
+            Toast.makeText(ctx, "录音启动失败：" + (e.message ?: ""), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun finish() {
+        val r = recorder ?: return
+        val f = recFile
+        val ok = try { r.stop(); true } catch (e: RuntimeException) { false }
+        try { r.release() } catch (_: Exception) {}
+        recorder = null
+        if (ok && f != null && f.length() > 0) {
+            val end = maxOf(System.currentTimeMillis(), recStart + 60000L)
+            val id = Repo.addMoment("", f.path, recStart, end)
+            onOpen(id)
+        } else {
+            f?.delete()
+            Toast.makeText(ctx, "录音太短，没有保存", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) begin() else Toast.makeText(ctx, "需要录音权限才能录音", Toast.LENGTH_SHORT).show()
+    }
+    DisposableEffect(Unit) {
+        onDispose { try { recorder?.release() } catch (_: Exception) {} }
+    }
+
+    val shape = RoundedCornerShape(30.dp)
+    Row(
+        modifier.clip(shape)
+            .background(Brush.verticalGradient(listOf(Color(0xF2FFFFFF), Color(0xD9FFFFFF))))
+            .border(1.dp, Color(0x22000000), shape)
+            .padding(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        MomentButton("✎", "文字", false) { onOpen(Repo.addMoment("", "")) }
+        MomentButton(
+            if (recorder != null) "⏹" else "🎙",
+            if (recorder != null) fmt(now - recStart) else "录音", recorder != null
+        ) {
+            if (recorder != null) finish()
+            else perm.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        MomentButton("◯", "待办", false, onTask)
+    }
+}
+
+@Composable
+private fun MomentButton(icon: String, label: String, active: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(24.dp))
+            .background(if (active) C.ink else Color(0x0F000000))
+            .bounceClick(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(icon, fontSize = 15.sp, color = if (active) Color.White else C.ink)
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else C.ink)
+    }
+}
+
+@Composable
+fun DayView(date: LocalDate, onOpen: (String) -> Unit, onEditTask: (String) -> Unit) {
     val d = Repo.data
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -131,11 +266,11 @@ fun DayView(date: LocalDate) {
     }
     val ds = Repo.dayStart(date)
     val evs = dayEvents(d, date, now)
-    // 块最矮 22dp：按这个高度分车道，上下相邻的块不会压在一起
-    assignLanes(evs, (22f / hourDp * 3600000f).toLong())
-    var sheetId by remember { mutableStateOf<String?>(null) }
+    // 块最矮 24dp：按这个高度分车道，上下相邻的块不会压在一起
+    assignLanes(evs, (24f / hourDp * 3600000f).toLong())
     var actionEv by remember { mutableStateOf<Ev?>(null) }
     var editSession by remember { mutableStateOf<Session?>(null) }
+    val allDay = d.tasks.filter { !it.done && it.date == date.toString() && it.time.isBlank() }
 
     Column(
         Modifier.fillMaxSize()
@@ -147,6 +282,23 @@ fun DayView(date: LocalDate) {
             }
             .verticalScroll(scroll)
     ) {
+        if (allDay.isNotEmpty()) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("今天的待办（没定具体时间）", fontSize = 11.sp, color = C.gray)
+                allDay.forEach { t ->
+                    val col = pcol(Repo.list(t.listId).color)
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFFF4F4F2))
+                            .clickable { onEditTask(t.id) }.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CheckCircle(false, col, 20.dp) { Repo.requestSettle(t.id) }
+                        Spacer(Modifier.width(8.dp))
+                        Text(t.title, fontSize = 14.sp, color = C.ink, maxLines = 1)
+                    }
+                }
+            }
+        }
         BoxWithConstraints(Modifier.fillMaxWidth().height(hourDp.dp * 24)) {
             val left = 44.dp
             val w = maxWidth - left - 8.dp
@@ -156,37 +308,71 @@ fun DayView(date: LocalDate) {
             }
             if (date == LocalDate.now()) {
                 val ny = (now - ds) / 3600000f
-                Box(Modifier.offset(x = left, y = hourDp.dp * ny + 7.dp).width(w).height(2.dp).background(C.red))
+                Box(Modifier.offset(x = left, y = hourDp.dp * ny + 7.dp).width(w).height(2.dp).background(C.ink))
             }
             evs.forEach { e ->
                 val topH = (e.st - ds) / 3600000f
                 val durH = (e.vEn - e.st) / 3600000f
                 val bh = hourDp.dp * durH - 1.dp
                 val col = pcol(e.tag.color)
-                Box(
-                    Modifier.offset(x = left + w * (e.lane.toFloat() / e.lanes), y = hourDp.dp * topH + 7.dp)
-                        .width(w / e.lanes).height(bh).padding(end = 2.dp)
-                        .clip(RoundedCornerShape(6.dp)).background(col.copy(alpha = 0.32f))
-                        .combinedClickable(onClick = { sheetId = e.s.id }, onLongClick = { actionEv = e })
-                ) {
-                    Row {
-                        Box(Modifier.width(3.dp).fillMaxHeight().background(col))
-                        Column(Modifier.padding(start = 4.dp, top = 2.dp, end = 3.dp)) {
-                            Text(
-                                e.emoji + e.name + " | " + fmtMin(e.en - e.st),
-                                fontSize = 11.sp, color = C.ink, maxLines = 1
-                            )
-                            // 放大后块变高：有空间就显示所思所感和照片，随块的高度自适应
-                            if (bh > 46.dp && e.s.note.isNotBlank()) {
-                                val lines = (((bh - 30.dp) / 14.dp).toInt()).coerceIn(1, 8)
-                                Text(e.s.note, fontSize = 11.sp, color = C.ink.copy(alpha = 0.8f), maxLines = lines)
-                            }
-                            if (bh > 70.dp && e.s.photos.isNotEmpty()) {
-                                AsyncImage(
-                                    File(e.s.photos.first()), null,
-                                    Modifier.padding(top = 3.dp).height((bh - 50.dp).coerceIn(24.dp, 160.dp)).clip(RoundedCornerShape(6.dp)),
-                                    contentScale = ContentScale.Fit
+                val pos = Modifier.offset(x = left + w * (e.lane.toFloat() / e.lanes), y = hourDp.dp * topH + 7.dp)
+                    .width(w / e.lanes).height(bh).padding(end = 2.dp)
+                if (e.isTask) {
+                    // 有具体时间的待办：白底卡片，左边是圆圈，点圆圈走结算，点卡片改任务
+                    Row(
+                        pos.clip(RoundedCornerShape(8.dp)).background(Color.White)
+                            .border(1.dp, col.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .clickable { onEditTask(e.taskId) }.padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CheckCircle(false, col, 18.dp) { Repo.requestSettle(e.taskId) }
+                        Spacer(Modifier.width(6.dp))
+                        Column {
+                            Text(e.name, fontSize = 12.sp, color = C.ink, maxLines = 1)
+                            if (bh >= 40.dp) Text(hm(e.st), fontSize = 10.sp, color = C.gray)
+                        }
+                    }
+                } else {
+                    // 时间段色块：浅色底 + 左边一条深色，第一行图标和名称，第二行时间范围和时长
+                    val showTime = bh >= 40.dp
+                    val hasPh = e.s.photos.isNotEmpty()
+                    val photoH = 34.dp
+                    val afterHead = bh - 6.dp - 16.dp - (if (showTime) 15.dp else 0.dp)
+                    val showPhotos = hasPh && afterHead >= photoH + 4.dp
+                    val noteRoom = afterHead - (if (showPhotos) photoH + 4.dp else 0.dp)
+                    val noteLines = if (e.s.note.isNotBlank()) (noteRoom / 14.dp).toInt().coerceIn(0, 6) else 0
+                    Box(
+                        pos.clip(RoundedCornerShape(8.dp)).background(col.copy(alpha = 0.22f))
+                            .combinedClickable(onClick = { onOpen(e.s.id) }, onLongClick = { actionEv = e })
+                    ) {
+                        Row {
+                            Box(Modifier.width(3.dp).fillMaxHeight().background(col))
+                            Column(Modifier.padding(start = 6.dp, top = 3.dp, end = 4.dp)) {
+                                Text(
+                                    e.emoji + " " + e.name + (if (e.s.audio.isNotBlank()) " 🎙" else "") + (if (showTime) "" else " | " + fmtMin(e.en - e.st)),
+                                    fontSize = 12.sp, fontWeight = FontWeight.Medium, color = C.ink, maxLines = 1
                                 )
+                                if (showTime) {
+                                    Text(
+                                        hm(e.st) + " – " + (if (e.s.end == null) "进行中" else hm(e.en)) + " · " + fmtMin(e.en - e.st),
+                                        fontSize = 10.sp, color = C.ink.copy(alpha = 0.6f), maxLines = 1
+                                    )
+                                }
+                                if (noteLines > 0) {
+                                    Text(e.s.note, fontSize = 11.sp, color = C.ink.copy(alpha = 0.8f), maxLines = noteLines)
+                                }
+                                // 照片：统一小尺寸、圆角，排在文字下面，不压住文字
+                                if (showPhotos) {
+                                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        e.s.photos.take(3).forEach { p ->
+                                            AsyncImage(
+                                                File(p), null,
+                                                Modifier.size(photoH).clip(RoundedCornerShape(8.dp)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -194,10 +380,9 @@ fun DayView(date: LocalDate) {
             }
         }
         DiarySection(date.toString())
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(96.dp))
     }
 
-    sheetId?.let { id -> SessionSheet(id) { sheetId = null } }
     actionEv?.let { e ->
         AlertDialog(
             onDismissRequest = { actionEv = null },
@@ -259,7 +444,7 @@ fun EditSessionDialog(s: Session, onDismiss: () -> Unit, onSave: (Session) -> Un
                         start = st, end = if (s.end == null) null else en
                     ))
                 }
-            }) { Text("保存", color = C.red) }
+            }) { Text("保存", color = C.accent) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
@@ -304,6 +489,7 @@ fun SessionSheet(id: String, onClose: () -> Unit) {
                 Spacer(Modifier.width(6.dp))
                 Text((tag?.group ?: "") + (if (s.auto) " · 自动" else " · 手动"), color = C.gray)
             }
+            if (s.audio.isNotBlank()) AudioPlayRow(s.audio)
             OutlinedTextField(
                 note, { note = it; Repo.updateSession(id) { x -> x.copy(note = it) } },
                 label = { Text("所思所感") }, minLines = 3, modifier = Modifier.fillMaxWidth()
@@ -372,7 +558,7 @@ fun MonthGrid(date: LocalDate, onPick: (LocalDate) -> Unit) {
                                     contentAlignment = Alignment.Center
                                 ) { Text(dn.toString(), color = if (today) Color.White else C.ink, fontSize = 14.sp) }
                                 Row {
-                                    if (key in busy) Box(Modifier.padding(1.dp).size(5.dp).clip(CircleShape).background(C.red))
+                                    if (key in busy) Box(Modifier.padding(1.dp).size(5.dp).clip(CircleShape).background(C.accent))
                                     if (key in diaryDays) Text("📓", fontSize = 9.sp)
                                     val wx = d.weather[key]
                                     if (wx != null) Text(wx, fontSize = 9.sp)
@@ -387,13 +573,42 @@ fun MonthGrid(date: LocalDate, onPick: (LocalDate) -> Unit) {
     }
 }
 
+
+/** 录音回放：▶ / ⏹ */
+@Composable
+fun AudioPlayRow(path: String) {
+    var player by remember(path) { mutableStateOf<MediaPlayer?>(null) }
+    DisposableEffect(path) { onDispose { try { player?.release() } catch (_: Exception) {} } }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF2F2F0)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("🎙 录音", Modifier.weight(1f), color = C.ink)
+        RippleButton(if (player != null) "⏹ 停止" else "▶ 播放", {
+            val cur = player
+            if (cur != null) {
+                try { cur.release() } catch (_: Exception) {}
+                player = null
+            } else {
+                try {
+                    val mp = MediaPlayer()
+                    mp.setDataSource(path)
+                    mp.prepare()
+                    mp.setOnCompletionListener { try { it.release() } catch (_: Exception) {}; player = null }
+                    mp.start()
+                    player = mp
+                } catch (_: Exception) {}
+            }
+        })
+    }
+}
+
 // ============================ 每日日记：导入 iPad 导出的 JPG / PDF ============================
 @Composable
 fun DiarySection(date: String) {
     val ctx = LocalContext.current
     val e = Repo.diaryOf(date)
     var viewer by remember(date) { mutableIntStateOf(-1) }
-    var note by remember(date) { mutableStateOf(e.text) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val dir = File(ctx.filesDir, "diary/" + date)
         val paths = uris.mapNotNull { copyUri(ctx, it, dir, "d_") }
@@ -403,7 +618,7 @@ fun DiarySection(date: String) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("日记", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = C.ink)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { pick.launch(arrayOf("image/*", "application/pdf")) }) { Text("＋ 导入 JPG / PDF", color = C.red) }
+            TextButton(onClick = { pick.launch(arrayOf("image/*", "application/pdf")) }) { Text("＋ 导入 JPG / PDF", color = C.accent) }
         }
         if (e.files.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -419,10 +634,6 @@ fun DiarySection(date: String) {
                 }
             }
         } else Text("这一天还没有日记。从微信文件传输助手/网盘把 iPad 导出的文件发到手机，再点上面导入。", fontSize = 12.sp, color = C.gray)
-        OutlinedTextField(
-            note, { note = it; Repo.diarySetText(date, it) }, label = { Text("文字备注（方便以后搜索）") },
-            minLines = 2, modifier = Modifier.fillMaxWidth()
-        )
     }
     if (viewer >= 0) DiaryViewer(e.files, viewer) { viewer = -1 }
 }

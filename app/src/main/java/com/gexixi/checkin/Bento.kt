@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -49,7 +53,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
 /** 一次「卡片展开」的请求：从哪个位置、什么颜色、里面放什么 */
-class ExpandReq(val rect: Rect, val color: Color, val title: String, val content: @Composable () -> Unit)
+class ExpandReq(val rect: Rect, val color: Color, val endColor: Color, val title: String, val content: @Composable () -> Unit)
 
 /** 展开状态放在最外层。点卡片 → open；返回/点暗处 → close */
 class BentoHost {
@@ -61,12 +65,16 @@ class BentoHost {
 
 val LocalBento = compositionLocalOf { BentoHost() }
 
+/** 展开页可以往顶部那一行（返回键右边）放内容，比如日历把日期放在 Today 旁边 */
+val LocalHeaderSlot = compositionLocalOf { mutableStateOf<(@Composable () -> Unit)?>(null) }
+
 /** 便当格卡片：24dp 圆角，按下回弹；有 detail 就在点击时从原位置展开成全屏 */
 @Composable
 fun Bento(
     modifier: Modifier = Modifier,
     color: Color = Color.White,
     title: String = "",
+    detailColor: Color = Color.White,
     detail: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
@@ -79,7 +87,7 @@ fun Bento(
         modifier
             .onGloballyPositioned { bounds = it.boundsInRoot() }
             .bounceClick(enabled = clickable) {
-                if (detail != null) host.open(ExpandReq(bounds, color, title, detail)) else onClick?.invoke()
+                if (detail != null) host.open(ExpandReq(bounds, color, detailColor, title, detail)) else onClick?.invoke()
             }
             .clip(RoundedCornerShape(24.dp))
             .background(color),
@@ -114,7 +122,8 @@ fun BentoOverlay(host: BentoHost) {
                 .background(Color(0x77000000))
                 .pointerInput(Unit) { detectTapGestures { host.close() } }
         )
-        val dark = r.color.luminance() < 0.35f
+        val dark = r.endColor.luminance() < 0.35f
+        val slot = remember(r) { mutableStateOf<(@Composable () -> Unit)?>(null) }
         Box(
             Modifier
                 .layout { m, c ->
@@ -130,7 +139,7 @@ fun BentoOverlay(host: BentoHost) {
                     shape = RoundedCornerShape((24f * (1f - p.value)).dp)
                     clip = true
                 }
-                .background(r.color)
+                .drawBehind { drawRect(lerp(r.color, r.endColor, p.value)) }
                 .pointerInput(Unit) { detectTapGestures { } }
         ) {
             // 内容按全屏尺寸固定排版，再反向平移抵消外框移动：外框放大时像「揭开」，不会反复重排
@@ -156,8 +165,13 @@ fun BentoOverlay(host: BentoHost) {
                             r.title, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                             color = if (dark) Color.White else C.ink
                         )
+                        Spacer(Modifier.weight(1f))
+                        slot.value?.invoke()
+                        Spacer(Modifier.width(10.dp))
                     }
-                    Box(Modifier.weight(1f).fillMaxWidth()) { r.content() }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        CompositionLocalProvider(LocalHeaderSlot provides slot) { r.content() }
+                    }
                 }
             }
         }

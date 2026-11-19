@@ -39,7 +39,8 @@ object C {
     val ink = Color(0xFF1E1E1E)
     val star = Color(0xFFFFC400)
     val starOff = Color(0xFFCFCFCB)
-    val red = Color(0xFFE0143C)
+    val red = Color(0xFFE0143C)          // 只用于删除这类危险操作，不再当强调色
+    val accent = Color(0xFF1E1E1E)       // 强调色：黑
     val pink = Color(0xFFEE7C95)
     val gray = Color(0xFF8E9093)
     val gold = Color(0xFFE8B84A)

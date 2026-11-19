@@ -59,6 +59,12 @@ object Media {
         } catch (_: Exception) {}
     }
 
+    /** 人物界面用：随机挑这个角色的一句台词（只取文字，不播放） */
+    fun sampleLine(ctx: Context, key: String): String {
+        val f = ctx.assets.list("audio")?.filter { it.startsWith(key + "_") }.orEmpty().randomOrNull() ?: return ""
+        return loadTexts(ctx)[f].orEmpty()
+    }
+
     /** 选角色（指定或随机）→ 随机播一条该角色的鼓励音频，返回角色和台词（台词给弹窗的气泡用）。 */
     fun cheer(ctx: Context, pref: String): Cheer {
         val key = if (chars.any { it.first == pref }) pref else chars.random().first
@@ -66,6 +72,7 @@ object Media {
         if (files.isEmpty()) return Cheer(key, "")
         val f = files.random()
         playAsset(ctx, "audio/" + f)
+        Repo.bumpPlay(key)
         return Cheer(key, loadTexts(ctx)[f].orEmpty())
     }
 }
