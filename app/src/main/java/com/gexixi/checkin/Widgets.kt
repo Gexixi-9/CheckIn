@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
+import android.text.TextPaint
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.View
@@ -200,7 +201,7 @@ class DayWidget : AppWidgetProvider() {
         private fun errorBitmap(msg: String): Bitmap {
             val b = Bitmap.createBitmap(600, 300, Bitmap.Config.ARGB_8888)
             val c = Canvas(b)
-            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 28f }
+            val p = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8E9093.toInt(); textSize = 28f }
             c.drawText(TextUtils.ellipsize(msg, p, 560f, TextUtils.TruncateAt.END).toString(), 20f, 150f, p)
             return b
         }
@@ -243,8 +244,8 @@ class DayWidget : AppWidgetProvider() {
                 c.drawLine(left, y, W - 8f, y, line)
                 if (h < 24) c.drawText("%02d".format(h), 10f, y + 8f, gray)
             }
-            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 26f; typeface = Typeface.DEFAULT_BOLD }
-            val sp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x991E1E1E.toInt(); textSize = 21f }
+            val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E1E1E.toInt(); textSize = 26f; typeface = Typeface.DEFAULT_BOLD }
+            val sp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x991E1E1E.toInt(); textSize = 21f }
             val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC1E1E1E.toInt(); textSize = 22f }
             val thumb = 52f
             evs.forEach { e ->
