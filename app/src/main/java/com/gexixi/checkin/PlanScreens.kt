@@ -153,7 +153,7 @@ fun PlanPage(onSettings: () -> Unit) {
             }
         }
         // 进度任务：子任务连成一条线，实心 = 已完成，空心 = 还没做；直接点圆圈勾选
-        Bento(Modifier.fillMaxWidth().height(cell), color = soft(cur?.let { Repo.list(it.listId).color } ?: 6, 0.2f), enabled = false) {
+        Bento(Modifier.fillMaxWidth().height(cell), color = soft(11, 0.28f), enabled = false) {
             if (cur == null || cur.subs.isEmpty()) {
                 Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.Center) {
                     Text("进度", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.ink)
@@ -182,11 +182,12 @@ fun PlanPage(onSettings: () -> Unit) {
         }
         BentoRow {
             Bento(Modifier.size(cell), color = soft(4, 0.4f), title = "待办", detail = { TodoScreen() }) {
+                val pending = Repo.pendingTasks()
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Text("待办", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.ink)
                     Spacer(Modifier.weight(1f))
-                    Text((visible.size - (if (cur != null) 1 else 0)).coerceAtLeast(0).toString(), fontSize = 54.sp, fontWeight = FontWeight.Bold, color = C.ink)
-                    Text("个在排队", fontSize = 12.sp, color = C.gray)
+                    Text(pending.size.toString(), fontSize = 54.sp, fontWeight = FontWeight.Bold, color = C.ink)
+                    Text("个未完成", fontSize = 12.sp, color = C.gray)
                 }
             }
             // 启动状态：压力 × 能量 四象限
@@ -223,7 +224,7 @@ fun PlanPage(onSettings: () -> Unit) {
             Bento(Modifier.size(cell), color = soft(9, 0.35f), onClick = { showAi = true }) {
                 Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Box(Modifier.magnetic().size(64.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                        Text("🤖", fontSize = 32.sp)
+                        AndroidHeadIcon(40.dp)
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("AI 拆分", color = C.ink, fontWeight = FontWeight.Medium)
@@ -374,7 +375,7 @@ fun CurrentCard(
 }
 
 @Composable
-fun TodoRow(t: Task, onDone: () -> Unit, onPush: () -> Unit) {
+fun TodoRow(t: Task, onDone: () -> Unit, onPush: () -> Unit, current: Boolean = false) {
     val tl = Repo.list(t.listId)
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onPush).dashedBottom().padding(vertical = 12.dp),
@@ -383,7 +384,7 @@ fun TodoRow(t: Task, onDone: () -> Unit, onPush: () -> Unit) {
         CheckCircle(false, pcol(tl.color), 28.dp, onDone)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(t.title, fontSize = 16.sp, color = C.ink)
+            Text(t.title + (if (current) "　· 当前" else ""), fontSize = 16.sp, color = C.ink)
             val meta = listOf(t.date, t.time).filter { it.isNotEmpty() }.joinToString(" ")
             if (meta.isNotEmpty()) Text(meta, fontSize = 11.sp, color = C.gray)
         }
@@ -392,40 +393,55 @@ fun TodoRow(t: Task, onDone: () -> Unit, onPush: () -> Unit) {
     }
 }
 
-// ============================ 待办列表（大数字加列表名，行间虚线） ============================
+// ============================ 待办列表（所有没完成的任务，大数字加列表名，行间虚线） ============================
 @Composable
 fun TodoScreen() {
     val ctx = LocalContext.current
     val d = Repo.data
     val cur = Repo.currentTask()
-    val others = Repo.visibleTasks().filter { it.id != cur?.id }
+    val td = Repo.today()
     var filter by remember { mutableStateOf("") }
-    val shown = others.filter { filter.isEmpty() || it.listId == filter }
+    var editing by remember { mutableStateOf<Task?>(null) }
+    val all = Repo.pendingTasks().filter { filter.isEmpty() || it.listId == filter }
+    val ready = all.filter { it.date.isEmpty() || it.date <= td }     // 现在就能做的（含当前任务）
+    val later = all.filter { it.date.isNotEmpty() && it.date > td }   // 日期还没到的
     val headList = d.lists.firstOrNull { it.id == filter }
     val color = pcol(headList?.color ?: 6)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Column(Modifier.fillMaxWidth()) {
-                Text(shown.size.toString(), fontSize = 44.sp, fontWeight = FontWeight.Bold, color = C.ink)
-                Text(headList?.name ?: "待办", fontSize = 18.sp, color = color, fontWeight = FontWeight.Medium)
+                Text(all.size.toString(), fontSize = 44.sp, fontWeight = FontWeight.Bold, color = C.ink)
+                Text(headList?.name ?: "待办", fontSize = 18.sp, color = darker(color, 0.75f), fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFB8B8B2)))
             }
         }
         item {
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
+            ChipFlow {
                 FilterChip(selected = filter.isEmpty(), onClick = { filter = "" }, label = { Text("全部") })
                 d.lists.forEach { l ->
-                    Spacer(Modifier.width(6.dp))
                     FilterChip(selected = filter == l.id, onClick = { filter = l.id }, label = { Text(l.emoji + l.name) })
                 }
             }
         }
-        items(shown, key = { it.id }) { t ->
-            TodoRow(t, onDone = { Repo.requestSettle(t.id) }, onPush = { Repo.setCurrent(t.id); Voice.announce(ctx, t) })
+        if (ready.isNotEmpty()) {
+            item { Text("现在可以做（点一下设为当前任务）", fontSize = 12.sp, color = C.gray) }
+            items(ready, key = { "r" + it.id }) { t ->
+                TodoRow(
+                    t, current = t.id == cur?.id, onDone = { Repo.requestSettle(t.id) },
+                    onPush = { Repo.setCurrent(t.id); Voice.announce(ctx, t) }
+                )
+            }
         }
-        if (shown.isEmpty()) item { Text("这里没有待办", color = C.gray, fontSize = 13.sp) }
+        if (later.isNotEmpty()) {
+            item { Text("之后（日期还没到，点一下可以修改）", fontSize = 12.sp, color = C.gray) }
+            items(later, key = { "l" + it.id }) { t ->
+                TodoRow(t, onDone = { Repo.requestSettle(t.id) }, onPush = { editing = t })
+            }
+        }
+        if (all.isEmpty()) item { Text("这里还没有待办。点规划页的「新任务」或日历底栏的「待办」就会出现在这里。", color = C.gray, fontSize = 13.sp) }
     }
+    editing?.let { e -> TaskEditor(e, { editing = null }) { Repo.updateTask(it); editing = null } }
 }
 
 // ============================ 按启动状态分类（压力 × 能量） ============================
@@ -583,10 +599,9 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, presetDate: String = "", p
                         ElasticSwitch(hasTime, { hasTime = it })
                     }
                     Text("重复")
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    ChipFlow {
                         listOf("不重复", "每天", "每周", "每月", "每年").forEachIndexed { i, n ->
                             FilterChip(selected = rep == i, onClick = { rep = i }, label = { Text(n) })
-                            Spacer(Modifier.width(6.dp))
                         }
                     }
                     if (rep > 0) {
@@ -598,7 +613,7 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, presetDate: String = "", p
                             Text(listOf("", "天", "周", "月", "年")[rep])
                         }
                         if (rep == 2) {
-                            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                            ChipFlow {
                                 listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { i, n ->
                                     val wd = i + 1
                                     FilterChip(
@@ -606,7 +621,6 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, presetDate: String = "", p
                                         onClick = { weekdays = if (wd in weekdays) weekdays - wd else weekdays + wd },
                                         label = { Text("周" + n) }
                                     )
-                                    Spacer(Modifier.width(6.dp))
                                 }
                             }
                         }
@@ -617,11 +631,10 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, presetDate: String = "", p
                         }
                     }
 
-                    Text("标签（决定颜色和 emoji）")
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    Text("标签（决定颜色和 emoji；只属于任务，和「记录」里的标签、分组互不相通）", fontSize = 13.sp)
+                    ChipFlow {
                         Repo.data.lists.forEach { l ->
                             FilterChip(selected = listId == l.id, onClick = { listId = l.id }, label = { Text(l.emoji + l.name) })
-                            Spacer(Modifier.width(6.dp))
                         }
                     }
                     Text("新建标签：选图标和颜色，写名字后按回车就生成，可以连着写下一个", fontSize = 12.sp, color = C.gray)
@@ -652,10 +665,9 @@ fun TaskEditor(initial: Task?, onDismiss: () -> Unit, presetDate: String = "", p
                     }
 
                     Text("启动状态（压力 × 能量，AI 会按它换拆法）")
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    ChipFlow {
                         (0..4).forEach { s ->
                             FilterChip(selected = state == s, onClick = { state = s }, label = { Text(STATE_EMOJI[s] + STATE_NAMES[s]) })
-                            Spacer(Modifier.width(6.dp))
                         }
                     }
                     if (state in 1..4) Text(STATE_HINTS[state], fontSize = 12.sp, color = C.gray)
@@ -708,10 +720,9 @@ fun AiDialog(onDismiss: () -> Unit) {
                 if (result.isEmpty()) {
                     OutlinedTextField(text, { text = it }, label = { Text("描述你要做的事") }, minLines = 3, modifier = Modifier.fillMaxWidth())
                     Text("现在的启动状态（可选）", fontSize = 12.sp, color = C.gray)
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    ChipFlow {
                         (0..4).forEach { s ->
                             FilterChip(selected = state == s, onClick = { state = s }, label = { Text(STATE_EMOJI[s] + STATE_NAMES[s]) })
-                            Spacer(Modifier.width(6.dp))
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -797,10 +808,9 @@ fun SettleDialog(taskId: String, onResult: (Cel?) -> Unit) {
                 Text(t.title, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 if (t.goal.isNotBlank()) Text("本次目标：" + t.goal, fontSize = 13.sp, color = C.gray)
                 if (t.condition.isNotBlank()) Text("达成条件：" + t.condition, fontSize = 14.sp, color = C.ink)
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                ChipFlow {
                     listOf("还没达到", "部分达成", "完全达成").forEachIndexed { i, n ->
                         FilterChip(selected = achieved == i, onClick = { achieved = i }, label = { Text(n) })
-                        Spacer(Modifier.width(6.dp))
                     }
                 }
                 OutlinedTextField(

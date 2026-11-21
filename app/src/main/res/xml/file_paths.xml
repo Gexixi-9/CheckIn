@@ -2,4 +2,6 @@
 <paths>
     <files-path name="notes" path="notes/" />
     <files-path name="wishes" path="wishes/" />
+    <files-path name="moments" path="moments/" />
+    <files-path name="friends" path="friends/" />
 </paths>

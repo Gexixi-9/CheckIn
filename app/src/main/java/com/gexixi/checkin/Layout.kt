@@ -4,6 +4,7 @@ import java.time.LocalDate
 
 /** 日历上的一个色块（已经裁到当天范围）。日历页和桌面小组件共用同一套错开算法。 */
 class Ev(val s: Session, val tag: Tag, val st: Long, val en: Long) {
+    var wantMs: Long = 0L  // 块里有文字/照片/录音时，需要额外撑高的时间长度（让内容放得下）
     var vEn: Long = en     // 视觉上占到的结束时间（太短的块也要占一小段高度）
     var lane = 0
     var lanes = 1
@@ -43,7 +44,7 @@ fun dayEvents(d: Data, date: LocalDate, now: Long = System.currentTimeMillis(), 
  * 太短的块也会占一段最小高度，所以上下挨着的块不会压在一起。
  */
 fun assignLanes(evs: List<Ev>, minVisMs: Long) {
-    evs.forEach { it.vEn = maxOf(it.en, it.st + minVisMs) }
+    evs.forEach { it.vEn = maxOf(it.en, it.st + maxOf(minVisMs, it.wantMs)) }
     val sorted = evs.sortedWith(compareBy({ it.st }, { it.vEn }))
     val cluster = mutableListOf<Ev>()
     val laneEnds = mutableListOf<Long>()
@@ -77,4 +78,17 @@ fun unionMs(list: List<Pair<Long, Long>>): Long {
     }
     if (curS >= 0) total += curE - curS
     return total
+}
+
+/** 块里有文字 / 照片 / 录音时，至少要多高（dp）才放得下；什么都没有就返回 0 */
+fun wantDp(e: Ev): Float {
+    if (e.isTask) return 0f
+    val s = e.s
+    if (s.note.isBlank() && s.photos.isEmpty() && s.audio.isBlank()) return 0f
+    var h = 12f
+    if (s.photos.isNotEmpty()) h += 42f                      // 照片在最上面
+    if (e.tag.id != "x_note") h += 18f + 16f                 // 名称行 + 时间行
+    if (s.audio.isNotBlank()) h += 38f
+    if (s.note.isNotBlank()) h += 15f * (s.note.length / 18 + 1).coerceAtMost(4)
+    return maxOf(h, 30f)
 }

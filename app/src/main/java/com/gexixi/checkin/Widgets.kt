@@ -69,7 +69,7 @@ object Widgets {
             p.color = color or (0xFF shl 24)
             c.drawCircle(r, r, r - 6, p)
         }
-        val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+        val tp = TextPaint(Paint.ANTI_ALIAS_FLAG)
         tp.textSize = size * 0.5f
         tp.textAlign = Paint.Align.CENTER
         c.drawText(emoji, r, r - (tp.ascent() + tp.descent()) / 2f, tp)
@@ -137,8 +137,11 @@ class TagWidget : AppWidgetProvider() {
                 rv.setImageViewBitmap(imgs[i], Widgets.circleBitmap(tag.emoji, pint(tag.color), run != null))
                 rv.setTextViewText(names[i], tag.name)
                 if (run != null) {
-                    val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - run.start)
+                    // 正向计时：从开始那一刻往上数。base 不能晚于现在，否则会显示成负数往 0 走（像倒数）
+                    val elapsed = (System.currentTimeMillis() - run.start).coerceAtLeast(0L)
+                    val base = SystemClock.elapsedRealtime() - elapsed
                     rv.setViewVisibility(chrs[i], View.VISIBLE)
+                    rv.setChronometerCountDown(chrs[i], false)
                     rv.setChronometer(chrs[i], base, null, true)
                 } else {
                     rv.setChronometer(chrs[i], SystemClock.elapsedRealtime(), null, false)
@@ -235,6 +238,7 @@ class DayWidget : AppWidgetProvider() {
             }
             val top = 84f
             val pxH = (H - top - 12f) / (endH - startH)
+            evs.forEach { it.wantMs = (wantDp(it) * 2.6f / pxH * 3600000f).toLong() }   // 有文字/照片/录音的块撑高（dp→px 约 2.6 倍）
             assignLanes(evs, (56f / pxH * 3600000f).toLong())     // 块最矮 56px，上下相邻不压
             val left = 64f
             val w = W - left - 14f
@@ -249,11 +253,11 @@ class DayWidget : AppWidgetProvider() {
             val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC1E1E1E.toInt(); textSize = 22f }
             val thumb = 52f
             evs.forEach { e ->
-                val y0 = top + ((e.st - ds) / 3600000f - startH) * pxH
+                val y0 = top + ((e.st - ds) / 3600000f - startH) * pxH + 3f
                 val y1 = top + ((e.vEn - ds) / 3600000f - startH) * pxH - 3f
                 val lw = w / e.lanes
                 val x0 = left + e.lane * lw
-                val x1 = x0 + lw - 5f
+                val x1 = x0 + lw - 12f                     // 块与块之间留缝，和 App 里一致
                 val col = pint(e.tag.color)
                 if (e.isTask) {
                     // 有具体时间的待办：白底圆角 + 空心圆
@@ -272,54 +276,34 @@ class DayWidget : AppWidgetProvider() {
                     c.drawText(TextUtils.ellipsize(e.name, tp, tw0, TextUtils.TruncateAt.END).toString(), x0 + 52f, cy + 9f, tp)
                     return@forEach
                 }
-                // 时间段色块：浅色底 + 左边深色条，圆角（和 App 里一致，不再是方的）
+                // 时间段色块（参照参考图）：圆角浅色卡片 + 缩进的圆头竖条（不贴边）
+                // 从上到下：照片 → 名称 → 小钟 + 时间范围 · 时长 → 录音条 → 文字
                 fill.style = Paint.Style.FILL
+                fill.color = (col and 0x00FFFFFF) or (0x33 shl 24)
+                c.drawRoundRect(RectF(x0, y0, x1, y1), 16f, 16f, fill)
+                fill.style = Paint.Style.STROKE
+                fill.strokeWidth = 2f
                 fill.color = (col and 0x00FFFFFF) or (0x38 shl 24)
-                c.drawRoundRect(RectF(x0, y0, x1, y1), 14f, 14f, fill)
+                c.drawRoundRect(RectF(x0, y0, x1, y1), 16f, 16f, fill)
+                fill.style = Paint.Style.FILL
                 fill.color = col or (0xFF shl 24)
-                val bar = android.graphics.Path()
-                bar.addRoundRect(RectF(x0, y0, x0 + 14f, y1), 14f, 14f, android.graphics.Path.Direction.CW)
-                c.save()
-                c.clipRect(x0, y0, x0 + 8f, y1)
-                c.drawPath(bar, fill)
-                c.restore()
-                val tx = x0 + 22f
-                val tw = x1 - tx - 8f
-                var cy = y0 + 12f                                  // 当前写到哪一行的上沿
                 val h = y1 - y0
-                // 第一行：图标 + 名称（块太矮时把时长接在后面）
-                val head = e.emoji + " " + e.name + (if (e.s.audio.isNotBlank()) " 🎙" else "") + (if (h < 84f) " | " + fmtMin(e.en - e.st) else "")
-                if (h >= 40f) {
-                    c.drawText(TextUtils.ellipsize(head, tp, tw, TextUtils.TruncateAt.END).toString(), tx, cy + 22f, tp)
-                    cy += 32f
-                }
-                // 第二行：时间范围 · 时长
-                if (h >= 84f) {
-                    val tr = hm(e.st) + " – " + (if (e.s.end == null) "进行中" else hm(e.en)) + " · " + fmtMin(e.en - e.st)
-                    c.drawText(TextUtils.ellipsize(tr, sp, tw, TextUtils.TruncateAt.END).toString(), tx, cy + 16f, sp)
-                    cy += 30f
-                }
-                // 所思所感：每行都按剩下的空间算，给照片留位置
-                val hasPh = e.s.photos.isNotEmpty()
-                val reserve = if (hasPh) thumb + 14f else 0f
-                if (e.s.note.isNotBlank() && h >= 120f) {
-                    var rest = e.s.note.replace("\n", " ")
-                    while (rest.isNotEmpty() && cy + 28f <= y1 - reserve - 6f) {
-                        val cnt = np.breakText(rest, true, tw, null).coerceAtLeast(1)
-                        c.drawText(rest.substring(0, cnt), tx, cy + 20f, np)
-                        rest = rest.substring(cnt)
-                        cy += 28f
-                    }
-                }
-                // 照片：统一小尺寸圆角方块，排在文字下面，间隔固定，不压字
-                if (hasPh && cy + thumb + 8f <= y1) {
+                val padY = if (h < 80f) 8f else 14f
+                c.drawRoundRect(RectF(x0 + 12f, y0 + padY, x0 + 18f, y1 - padY), 3f, 3f, fill)
+                val tx = x0 + 32f
+                val tw = x1 - tx - 12f
+                var cy = y0 + padY
+                val isMoment = e.tag.id == "x_note"
+                val compact = h < 90f
+                // 照片：统一小尺寸圆角方块，最上面
+                if (e.s.photos.isNotEmpty() && cy + thumb + 6f <= y1 - padY) {
                     var px = tx
                     e.s.photos.take(3).forEach { p ->
                         val th = decodeThumb(p, 160)
                         if (th != null) {
                             val side = minOf(th.width, th.height)
                             val src = android.graphics.Rect((th.width - side) / 2, (th.height - side) / 2, (th.width + side) / 2, (th.height + side) / 2)
-                            val dst = RectF(px, cy + 6f, px + thumb, cy + 6f + thumb)
+                            val dst = RectF(px, cy, px + thumb, cy + thumb)
                             val path = android.graphics.Path()
                             path.addRoundRect(dst, 12f, 12f, android.graphics.Path.Direction.CW)
                             c.save()
@@ -329,15 +313,66 @@ class DayWidget : AppWidgetProvider() {
                             px += thumb + 8f
                         }
                     }
+                    cy += thumb + 10f
+                }
+                // 名称（块矮时把时长接在后面）；即时记录不显示名称
+                if (!isMoment && cy + 26f <= y1) {
+                    val head = e.emoji + " " + e.name + (if (e.s.audio.isNotBlank()) " 🎙" else "") + (if (compact) " · " + fmtMin(e.en - e.st) else "")
+                    c.drawText(TextUtils.ellipsize(head, tp, tw, TextUtils.TruncateAt.END).toString(), tx, cy + 22f, tp)
+                    cy += 34f
+                }
+                // 时间行：小钟 + 范围 · 时长
+                if (!isMoment && !compact && cy + 24f <= y1) {
+                    fill.style = Paint.Style.STROKE
+                    fill.strokeWidth = 2.4f
+                    fill.color = 0x881E1E1E.toInt()
+                    c.drawCircle(tx + 8f, cy + 11f, 7f, fill)
+                    c.drawLine(tx + 8f, cy + 11f, tx + 8f, cy + 6f, fill)
+                    c.drawLine(tx + 8f, cy + 11f, tx + 12f, cy + 13f, fill)
+                    fill.style = Paint.Style.FILL
+                    val tr = hm(e.st) + " - " + (if (e.s.end == null) "进行中" else hm(e.en)) + " · " + fmtMin(e.en - e.st)
+                    c.drawText(TextUtils.ellipsize(tr, sp, tw - 26f, TextUtils.TruncateAt.END).toString(), tx + 26f, cy + 18f, sp)
+                    cy += 30f
+                }
+                // 录音：小圆 + 三角形 + 一排细竖条
+                if (e.s.audio.isNotBlank() && cy + 44f <= y1) {
+                    fill.style = Paint.Style.FILL
+                    fill.color = 0xFF1E1E1E.toInt()
+                    c.drawCircle(tx + 18f, cy + 22f, 18f, fill)
+                    fill.color = 0xFFFFFFFF.toInt()
+                    val tri = android.graphics.Path()
+                    tri.moveTo(tx + 12f, cy + 12f); tri.lineTo(tx + 12f, cy + 32f); tri.lineTo(tx + 29f, cy + 22f); tri.close()
+                    c.drawPath(tri, fill)
+                    fill.color = 0x661E1E1E
+                    val rnd = java.util.Random(e.s.audio.hashCode().toLong())
+                    var bx = tx + 48f
+                    while (bx < tx + tw - 6f) {
+                        val bh2 = 8f + rnd.nextFloat() * 26f
+                        c.drawRoundRect(RectF(bx, cy + 22f - bh2 / 2f, bx + 5f, cy + 22f + bh2 / 2f), 3f, 3f, fill)
+                        bx += 9f
+                    }
+                    cy += 48f
+                }
+                // 文字
+                if (e.s.note.isNotBlank()) {
+                    var rest = e.s.note.replace("\n", " ")
+                    while (rest.isNotEmpty() && cy + 26f <= y1 - padY + 4f) {
+                        val cnt = np.breakText(rest, true, tw, null).coerceAtLeast(1)
+                        c.drawText(rest.substring(0, cnt), tx, cy + 20f, np)
+                        rest = rest.substring(cnt)
+                        cy += 28f
+                    }
                 }
             }
             if (date == LocalDate.now()) {
                 val y = top + ((now - ds) / 3600000f - startH) * pxH
                 if (y in top..(H - 4f)) {
                     fill.style = Paint.Style.FILL
-                    fill.color = 0xFF1E1E1E.toInt()
-                    c.drawRect(left, y - 1.5f, W - 8f, y + 1.5f, fill)
-                    c.drawCircle(left, y, 7f, fill)
+                    // 细细的半透明线 + 一个小点，不挡视线
+                    fill.color = 0x551E1E1E
+                    c.drawRect(left, y - 0.75f, W - 8f, y + 0.75f, fill)
+                    fill.color = 0x881E1E1E.toInt()
+                    c.drawCircle(left, y, 5f, fill)
                 }
             }
             return bmp

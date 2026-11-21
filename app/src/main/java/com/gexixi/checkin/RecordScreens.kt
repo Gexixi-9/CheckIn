@@ -202,6 +202,22 @@ fun RecordPage(onSettings: () -> Unit) {
                 }
             }
         }
+        // 朋友圈：自己加的角色会来点赞评论、也会发动态
+        val lastPost = d.posts.maxByOrNull { it.ts }
+        Bento(Modifier.fillMaxWidth().height(cell), color = soft(8, 0.3f), title = "朋友圈", detail = { MomentsScreen() }) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("朋友圈", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.ink)
+                    Text(d.friends.size.toString() + " 位好友", fontSize = 12.sp, color = C.gray)
+                }
+                Spacer(Modifier.weight(1f))
+                if (lastPost != null) {
+                    Text(Moments.name(lastPost.author) + "：" + lastPost.text.ifBlank { "[图片]" }, fontSize = 14.sp, color = C.ink, maxLines = 2)
+                } else {
+                    Text("还没有动态。点进去添加几个朋友，发一条试试。", fontSize = 13.sp, color = C.gray)
+                }
+            }
+        }
     }
     if (askFinish) StopwatchDialog(if (d.stopwatchStart > 0L) now - d.stopwatchStart else 0L) { askFinish = false }
 }
@@ -210,7 +226,6 @@ fun RecordPage(onSettings: () -> Unit) {
 @Composable
 private fun StopwatchDialog(elapsedMs: Long, onClose: () -> Unit) {
     val d = Repo.data
-    val tags = (Repo.quickTags() + d.tags.filter { !it.hidden() }).distinctBy { it.id }
     var tagId by remember { mutableStateOf("x_focus") }
     var title by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
@@ -221,11 +236,17 @@ private fun StopwatchDialog(elapsedMs: Long, onClose: () -> Unit) {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(title, { title = it }, label = { Text("写一句，比如：写论文第三章") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Text("归到哪个标签（决定日历里的颜色）", fontSize = 12.sp, color = C.gray)
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    FilterChip(selected = tagId == "x_focus", onClick = { tagId = "x_focus" }, label = { Text("⏱️ 不归类") })
-                    tags.forEach { t ->
-                        Spacer(Modifier.width(6.dp))
-                        FilterChip(selected = tagId == t.id, onClick = { tagId = t.id }, label = { Text(t.emoji + t.name) })
+                ChipFlow { FilterChip(selected = tagId == "x_focus", onClick = { tagId = "x_focus" }, label = { Text("⏱️ 不归类") }) }
+                // 按分组排开，每组里的标签自动换行，不用横着一直滑
+                d.groups.forEach { g ->
+                    val inGroup = d.tags.filter { it.group == g.name && !it.hidden() }
+                    if (inGroup.isNotEmpty()) {
+                        Text(g.emoji + " " + g.name, fontSize = 12.sp, color = C.gray)
+                        ChipFlow {
+                            inGroup.forEach { t ->
+                                FilterChip(selected = tagId == t.id, onClick = { tagId = t.id }, label = { Text(t.emoji + t.name) })
+                            }
+                        }
                     }
                 }
                 OutlinedTextField(note, { note = it }, label = { Text("所思所感（可选）") }, minLines = 2, modifier = Modifier.fillMaxWidth())
@@ -299,7 +320,7 @@ fun DiaryPage() {
             TextButton(onClick = { step(1) }) { Text("›", fontSize = 24.sp, color = C.ink) }
         }
         when (mode) {
-            0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { DiarySection(date.toString()); Spacer(Modifier.height(24.dp)) }
+            0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { AiDiaryCard(date); DiarySection(date.toString()); Spacer(Modifier.height(24.dp)) }
             1 -> DiaryWeek(date) { date = it; mode = 0 }
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { MonthGrid(date) { date = it; mode = 0 } }
         }
@@ -615,10 +636,9 @@ fun TagDialog(initial: Tag?, group0: String, onDismiss: () -> Unit, onSave: (Tag
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { ReqLabel("名称") }, singleLine = true)
                 OutlinedTextField(emoji, { emoji = it.take(4) }, label = { Text("图标（一个 emoji）") }, singleLine = true)
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                ChipFlow {
                     Repo.data.groups.map { it.name }.forEach { g ->
                         FilterChip(selected = group == g, onClick = { group = g }, label = { Text(g) })
-                        Spacer(Modifier.width(6.dp))
                     }
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState())) {

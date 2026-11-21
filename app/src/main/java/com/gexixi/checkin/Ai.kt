@@ -144,6 +144,111 @@ object Ai {
         o.optInt("coins", planned).coerceIn(0, cap) to o.optString("comment")
     }
 
+    // ============ 通用：让 AI 返回一个 json 对象 ============
+    private suspend fun chatJson(p: Prefs, sys: String, user: String, img: String? = null, temp: Double = 0.7): JSONObject =
+        withContext(Dispatchers.IO) {
+            if (p.dsKey.isBlank()) throw Exception("请先在「设置」里填 DeepSeek API Key")
+            val userContent: Any = if (img != null) {
+                JSONArray()
+                    .put(JSONObject().put("type", "text").put("text", user))
+                    .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64," + img)))
+            } else user
+            val body = JSONObject()
+                .put("model", if (img != null) p.dsVision else p.dsModel)
+                .put("temperature", temp)
+                .put("messages", JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", sys))
+                    .put(JSONObject().put("role", "user").put("content", userContent)))
+            if (img == null) body.put("response_format", JSONObject().put("type", "json_object"))
+            val resp = String(post(p.dsBase.trimEnd('/') + "/chat/completions", p.dsKey, body.toString()), Charsets.UTF_8)
+            var content = JSONObject(resp).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+            val a = content.indexOf('{')
+            val b = content.lastIndexOf('}')
+            if (a >= 0 && b > a) content = content.substring(a, b + 1)
+            JSONObject(content)
+        }
+
+    // ============ AI 日记：引导提问 → 整理成日记 → 感恩风格点评 ============
+    data class DiaryQ(val q: String, val options: List<String>)
+
+    private const val GRATITUDE = "语言风格参考「感恩日记」：温柔、具体、不说教、不喊口号，多用「感谢」「幸好」「很珍惜」「真好」这类表达，把今天的小事写成值得感恩的瞬间。"
+
+    suspend fun diaryQuestions(p: Prefs, dayContext: String): List<DiaryQ> {
+        val sys = """你是一位温柔的日记引导者，帮用户回忆今天、写日记。只输出 json：{"questions":[{"q":"问题","options":["选项1","选项2"]}]}
+规则：
+1. 随机提 4 个问题，每次的角度要有变化（随机种子 ${System.nanoTime() % 9973}）：可以问今天的小确幸、让情绪好一点的瞬间、想感谢的人或事、辛苦的地方、想对自己说的话、明天想怎么对待自己。
+2. 要结合下面的「今天的记录」，问得具体，不要空泛；记录很少就问生活里的小事。
+3. 其中 2 个问题给 3 到 4 个选项（选项是第一人称的短句，比如「今天吃得很满足」，方便点选），另外 2 个是开放问答（options 写空数组）。
+4. 问题用中文，语气像朋友聊天，一句话以内。
+$GRATITUDE"""
+        val o = chatJson(p, sys, "今天的记录：\n" + dayContext, temp = 1.0)
+        val arr = o.getJSONArray("questions")
+        return (0 until arr.length()).mapNotNull { i ->
+            val q = arr.getJSONObject(i)
+            val ops = q.optJSONArray("options")
+            val list = if (ops == null) emptyList() else (0 until ops.length()).map { ops.optString(it) }.filter { it.isNotBlank() }
+            if (q.optString("q").isBlank()) null else DiaryQ(q.optString("q"), list)
+        }
+    }
+
+    suspend fun diaryCompose(p: Prefs, dayContext: String, qa: List<Pair<String, String>>): String {
+        val sys = """你帮用户把今天的回答整理成一篇日记。只输出 json：{"diary":"日记正文"}
+规则：第一人称「我」；只用用户给的事实和感受，不编造没发生的事；150 到 300 字，分两三段，自然流畅；最后单独一行写「今天的三件小确幸：」后面列三条（从回答和记录里找）。
+$GRATITUDE"""
+        val user = "今天的记录：\n" + dayContext + "\n\n用户的回答：\n" + qa.joinToString("\n") { "问：" + it.first + "\n答：" + it.second.ifBlank { "（没回答）" } }
+        return chatJson(p, sys, user, temp = 0.8).optString("diary").trim()
+    }
+
+    suspend fun diaryReview(p: Prefs, dayContext: String, diary: String): String {
+        val sys = """你每天给用户的日记或生活写一段点评，像一位温柔的陪伴者。只输出 json：{"review":"点评"}
+规则：先具体地肯定和感谢今天做到的小事（引用记录或日记里的细节）；再轻轻提一个值得留意的地方（比如休息、情绪、节奏），没有就不提；最后用一句暖暖的话收尾。4 到 6 句，中文，不说教。
+$GRATITUDE"""
+        val user = "今天的记录：\n" + dayContext + (if (diary.isNotBlank()) "\n\n用户的日记：\n" + diary else "\n\n（用户今天没写日记，请只点评生活记录）")
+        return chatJson(p, sys, user, temp = 0.8).optString("review").trim()
+    }
+
+    // ============ 朋友圈 ============
+    data class Reaction(val friend: String, val like: Boolean, val comment: String)
+
+    private fun friendLines(fs: List<Friend>): String =
+        fs.joinToString("\n") { "- id=" + it.id + "；名字：" + it.name + "；和用户的关系：" + it.relation.ifBlank { "朋友" } + "；人设：" + it.persona.ifBlank { "普通朋友" } }
+
+    /** 一条动态发出去后，每个好友按自己的人设决定点不点赞、评论什么 */
+    suspend fun momentReactions(p: Prefs, friends: List<Friend>, authorDesc: String, text: String, img: String?): List<Reaction> {
+        val sys = """你在扮演用户朋友圈里的一群好友，他们刷到了一条动态。只输出 json：{"reactions":[{"friend":"好友id","like":true,"comment":""}]}
+好友们：
+${friendLines(friends)}
+规则：
+1. 每个好友各自按人设和与用户的关系决定：点不点赞、要不要评论、评论什么。像真实的朋友圈，不是每个人都评论，至少要有一个人点赞。
+2. 评论要短（5 到 30 字），口语，符合各自说话方式；不同人的评论不要雷同；可以用表情；不要说教。
+3. 没话说就 comment 留空字符串。friend 必须是上面给出的 id。"""
+        val user = "动态作者：" + authorDesc + "\n动态内容：" + text.ifBlank { "（只有图片）" } + (if (img != null) "\n（动态里带了一张图片，见附图）" else "")
+        val o = chatJson(p, sys, user, img, 0.9)
+        val arr = o.optJSONArray("reactions") ?: return emptyList()
+        val ids = friends.map { it.id }.toSet()
+        return (0 until arr.length()).mapNotNull { i ->
+            val r = arr.getJSONObject(i)
+            val id = r.optString("friend")
+            if (id in ids) Reaction(id, r.optBoolean("like", false), r.optString("comment").trim()) else null
+        }
+    }
+
+    /** 用户回复了好友的评论 / 动态，好友用自己的口吻回一句 */
+    suspend fun momentReply(p: Prefs, f: Friend, postText: String, thread: String, userText: String): String {
+        val sys = """你在扮演「${f.name}」，和用户的关系：${f.relation.ifBlank { "朋友" }}；人设：${f.persona.ifBlank { "普通朋友" }}。
+用户在朋友圈里回复了你，请用你的口吻回一句。5 到 40 字，口语、自然，不说教，可以带表情。只输出 json：{"reply":"回复"}"""
+        val user = "那条动态：" + postText + "\n之前的对话：\n" + thread.ifBlank { "（无）" } + "\n用户刚刚说：" + userText
+        return chatJson(p, sys, user, temp = 0.9).optString("reply").trim()
+    }
+
+    /** 好友自己发一条朋友圈（只有文字） */
+    suspend fun friendPost(p: Prefs, f: Friend, others: String): String {
+        val hour = java.time.LocalTime.now().hour
+        val sys = """你在扮演「${f.name}」，和用户的关系：${f.relation.ifBlank { "朋友" }}；人设：${f.persona.ifBlank { "普通朋友" }}。
+现在是 ${hour} 点左右。请发一条朋友圈动态：只有文字，1 到 3 句，像真实的朋友圈（日常、心情、吐槽、分享都行），符合你的人设和说话方式，不要提图片或照片，不要写「发图」。每次的话题要不一样（随机种子 ${System.nanoTime() % 9973}）。只输出 json：{"text":"动态内容"}"""
+        return chatJson(p, sys, "最近朋友圈里别人发过的（避免重复）：\n" + others.ifBlank { "（无）" }, temp = 1.0).optString("text").trim()
+    }
+
     /** 硅基流动 TTS：只用于任务发放播报。生成后写进缓存文件。 */
     suspend fun tts(p: Prefs, text: String, out: File) = withContext(Dispatchers.IO) {
         if (p.ttsKey.isBlank()) throw Exception("请先在「设置」里填硅基流动 API Key")

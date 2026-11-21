@@ -180,10 +180,9 @@ private fun AudioSettings() {
     val p = Repo.data.prefs
     Body {
         Section("完成任务时的鼓励音频")
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
+        ChipFlow {
             (listOf("random" to "随机") + Media.chars).forEach { (k, n) ->
                 FilterChip(selected = p.character == k, onClick = { Repo.setPrefs { it.copy(character = k) } }, label = { Text(n) })
-                Spacer(Modifier.width(8.dp))
             }
         }
         RippleButton("▶ 试听", { Media.cheer(ctx, p.character) })

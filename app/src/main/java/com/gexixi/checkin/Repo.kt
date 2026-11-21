@@ -69,6 +69,7 @@ object Repo {
     /** 仅供 Android Studio 预览窗格塞示例数据 */
     fun preview(d: Data) { data = d }
 
+    @Synchronized
     fun update(f: (Data) -> Data) {
         data = f(data)
         try { file.writeText(Gson().toJson(data)) } catch (_: Exception) {}
@@ -245,6 +246,10 @@ object Repo {
         return data.tasks.filter { !it.done && (it.date.isEmpty() || it.date <= td) }
             .sortedWith(compareBy<Task>({ it.date.ifEmpty { td } }, { it.time.ifEmpty { "99:99" } }))
     }
+
+    /** 所有没完成的任务（包含日期还没到的），待办列表用 */
+    fun pendingTasks(): List<Task> =
+        data.tasks.filter { !it.done }.sortedWith(compareBy<Task>({ it.date.ifEmpty { today() } }, { it.time.ifEmpty { "99:99" } }))
 
     fun currentTask(): Task? {
         val v = visibleTasks()
@@ -424,6 +429,78 @@ object Repo {
         update { d -> val e = diaryOf(date); putDiary(d, e.copy(files = e.files.filter { it != path })) }
         try { File(path).delete() } catch (_: Exception) {}
     }
+    fun diarySetReview(date: String, review: String) = update { d -> putDiary(d, diaryOf(date).copy(review = review)) }
+
+    /** 给 AI 看的「这一天发生了什么」：生活记录（含感想）+ 完成的任务 + 天气 */
+    fun dayContext(date: LocalDate): String {
+        val zone = ZoneId.systemDefault()
+        val ds = dayStart(date)
+        val de = ds + 86400000L
+        val sb = StringBuilder()
+        sb.append("日期：").append(date.toString()).append("\n")
+        data.weather[date.toString()]?.let { sb.append("天气：").append(it).append("\n") }
+        val ss = data.sessions.filter { it.start in ds until de }.sortedBy { it.start }
+        if (ss.isNotEmpty()) {
+            sb.append("生活记录：\n")
+            ss.take(20).forEach { s ->
+                val t = tag(s.tagId)
+                if (t != null && s.tagId != "x_note") {
+                    val mins = ((s.end ?: s.start) - s.start) / 60000
+                    sb.append("- ").append(s.title.ifBlank { t.name }).append("，").append(mins).append("分钟")
+                    if (s.note.isNotBlank()) sb.append("，当时的感想：").append(s.note)
+                    sb.append("\n")
+                } else if (s.note.isNotBlank()) sb.append("- 随手记：").append(s.note).append("\n")
+            }
+        }
+        val done = data.tasks.filter { it.doneAt in ds until de }
+        if (done.isNotEmpty()) {
+            sb.append("完成的任务：\n")
+            done.take(10).forEach { t ->
+                sb.append("- ").append(t.title)
+                if (t.doneNote.isNotBlank()) sb.append("（感想：").append(t.doneNote).append("）")
+                sb.append("\n")
+            }
+        }
+        if (ss.isEmpty() && done.isEmpty()) sb.append("（今天几乎没有记录）\n")
+        return sb.toString()
+    }
+
+    // ================= 朋友圈 =================
+    fun addFriend(f: Friend) { update { it.copy(friends = it.friends + f) } }
+    fun updateFriend(f: Friend) { update { d -> d.copy(friends = d.friends.map { if (it.id == f.id) f else it }) } }
+
+    fun deleteFriend(id: String) {
+        update { d ->
+            d.copy(
+                friends = d.friends.filter { it.id != id },
+                posts = d.posts.filter { it.author != id }.map { p ->
+                    p.copy(likes = p.likes - id, comments = p.comments.filter { it.author != id })
+                }
+            )
+        }
+    }
+
+    fun addPost(p: Post) { update { it.copy(posts = it.posts + p) } }
+
+    fun deletePost(id: String) {
+        val p = data.posts.firstOrNull { it.id == id }
+        update { d -> d.copy(posts = d.posts.filter { it.id != id }) }
+        p?.photos?.forEach { try { File(it).delete() } catch (_: Exception) {} }
+    }
+
+    fun setLike(postId: String, who: String, on: Boolean) {
+        update { d ->
+            d.copy(posts = d.posts.map { p ->
+                if (p.id != postId) p
+                else p.copy(likes = if (on) (if (who in p.likes) p.likes else p.likes + who) else p.likes - who)
+            })
+        }
+    }
+
+    fun addComment(postId: String, c: MComment) {
+        update { d -> d.copy(posts = d.posts.map { p -> if (p.id == postId) p.copy(comments = p.comments + c) else p }) }
+    }
+
     fun diarySetText(date: String, text: String) = update { d -> putDiary(d, diaryOf(date).copy(text = text)) }
 
     // ================= 小组件状态 / 备份 =================
@@ -449,6 +526,12 @@ object Repo {
                 }
                 File(app.filesDir, "wishes").walkTopDown().filter { it.isFile }.forEach {
                     add(it, "wishes/" + it.relativeTo(File(app.filesDir, "wishes")).path)
+                }
+                File(app.filesDir, "friends").walkTopDown().filter { it.isFile }.forEach {
+                    add(it, "friends/" + it.relativeTo(File(app.filesDir, "friends")).path)
+                }
+                File(app.filesDir, "moments").walkTopDown().filter { it.isFile }.forEach {
+                    add(it, "moments/" + it.relativeTo(File(app.filesDir, "moments")).path)
                 }
                 File(app.filesDir, "people").walkTopDown().filter { it.isFile }.forEach {
                     add(it, "people/" + it.relativeTo(File(app.filesDir, "people")).path)
@@ -500,7 +583,9 @@ object Repo {
             wishes = loaded.wishes.map { it.copy(photo = fix(it.photo)) },
             sessions = loaded.sessions.map { it.copy(photos = it.photos.map { p -> fix(p) }, audio = fix(it.audio)) },
             diary = loaded.diary.map { it.copy(files = it.files.map { p -> fix(p) }) },
-            charPhotos = loaded.charPhotos.mapValues { fix(it.value) }
+            charPhotos = loaded.charPhotos.mapValues { fix(it.value) },
+            friends = loaded.friends.map { it.copy(avatar = fix(it.avatar)) },
+            posts = loaded.posts.map { it.copy(photos = it.photos.map { p -> fix(p) }) }
         )
         data = normalize(fixed)
         try { file.writeText(Gson().toJson(data)) } catch (_: Exception) {}

@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -267,6 +268,7 @@ fun DayView(date: LocalDate, onOpen: (String) -> Unit, onEditTask: (String) -> U
     val ds = Repo.dayStart(date)
     val evs = dayEvents(d, date, now)
     // 块最矮 24dp：按这个高度分车道，上下相邻的块不会压在一起
+    evs.forEach { it.wantMs = (wantDp(it) / hourDp * 3600000f).toLong() }   // 有文字/照片/录音的块自动撑高
     assignLanes(evs, (24f / hourDp * 3600000f).toLong())
     var actionEv by remember { mutableStateOf<Ev?>(null) }
     var editSession by remember { mutableStateOf<Session?>(null) }
@@ -308,74 +310,34 @@ fun DayView(date: LocalDate, onOpen: (String) -> Unit, onEditTask: (String) -> U
             }
             if (date == LocalDate.now()) {
                 val ny = (now - ds) / 3600000f
-                Box(Modifier.offset(x = left, y = hourDp.dp * ny + 7.dp).width(w).height(2.dp).background(C.ink))
+                Box(Modifier.offset(x = left, y = hourDp.dp * ny + 7.dp).width(w).height(1.dp).background(C.ink.copy(alpha = 0.28f)))
+                Box(Modifier.offset(x = left - 3.dp, y = hourDp.dp * ny + 5.dp).size(5.dp).clip(CircleShape).background(C.ink.copy(alpha = 0.45f)))
             }
             evs.forEach { e ->
                 val topH = (e.st - ds) / 3600000f
                 val durH = (e.vEn - e.st) / 3600000f
-                val bh = hourDp.dp * durH - 1.dp
-                val col = pcol(e.tag.color)
-                val pos = Modifier.offset(x = left + w * (e.lane.toFloat() / e.lanes), y = hourDp.dp * topH + 7.dp)
-                    .width(w / e.lanes).height(bh).padding(end = 2.dp)
+                // 块与块之间留缝（左右 6dp、上下各 2dp），和参考图一样不贴在一起
+                val bh = hourDp.dp * durH - 4.dp
+                val pos = Modifier.offset(x = left + w * (e.lane.toFloat() / e.lanes), y = hourDp.dp * topH + 9.dp)
+                    .width(w / e.lanes - 6.dp).height(bh)
                 if (e.isTask) {
-                    // 有具体时间的待办：白底卡片，左边是圆圈，点圆圈走结算，点卡片改任务
+                    val col = pcol(e.tag.color)
+                    // 有具体时间的待办：白底圆角卡片，左边空心圆圈，点圆圈走结算，点卡片改任务
                     Row(
-                        pos.clip(RoundedCornerShape(8.dp)).background(Color.White)
-                            .border(1.dp, col.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .clickable { onEditTask(e.taskId) }.padding(horizontal = 6.dp),
+                        pos.clip(RoundedCornerShape(10.dp)).background(Color.White)
+                            .border(1.dp, Color(0xFFE6E6E2), RoundedCornerShape(10.dp))
+                            .clickable { onEditTask(e.taskId) }.padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        CheckCircle(false, col, 18.dp) { Repo.requestSettle(e.taskId) }
-                        Spacer(Modifier.width(6.dp))
+                        CheckCircle(false, col, 20.dp) { Repo.requestSettle(e.taskId) }
+                        Spacer(Modifier.width(8.dp))
                         Column {
-                            Text(e.name, fontSize = 12.sp, color = C.ink, maxLines = 1)
-                            if (bh >= 40.dp) Text(hm(e.st), fontSize = 10.sp, color = C.gray)
+                            Text(e.name, fontSize = 13.sp, color = C.ink, maxLines = 1)
+                            if (bh >= 40.dp) Text(hm(e.st), fontSize = 11.sp, color = C.gray)
                         }
                     }
                 } else {
-                    // 时间段色块：浅色底 + 左边一条深色，第一行图标和名称，第二行时间范围和时长
-                    val showTime = bh >= 40.dp
-                    val hasPh = e.s.photos.isNotEmpty()
-                    val photoH = 34.dp
-                    val afterHead = bh - 6.dp - 16.dp - (if (showTime) 15.dp else 0.dp)
-                    val showPhotos = hasPh && afterHead >= photoH + 4.dp
-                    val noteRoom = afterHead - (if (showPhotos) photoH + 4.dp else 0.dp)
-                    val noteLines = if (e.s.note.isNotBlank()) (noteRoom / 14.dp).toInt().coerceIn(0, 6) else 0
-                    Box(
-                        pos.clip(RoundedCornerShape(8.dp)).background(col.copy(alpha = 0.22f))
-                            .combinedClickable(onClick = { onOpen(e.s.id) }, onLongClick = { actionEv = e })
-                    ) {
-                        Row {
-                            Box(Modifier.width(3.dp).fillMaxHeight().background(col))
-                            Column(Modifier.padding(start = 6.dp, top = 3.dp, end = 4.dp)) {
-                                Text(
-                                    e.emoji + " " + e.name + (if (e.s.audio.isNotBlank()) " 🎙" else "") + (if (showTime) "" else " | " + fmtMin(e.en - e.st)),
-                                    fontSize = 12.sp, fontWeight = FontWeight.Medium, color = C.ink, maxLines = 1
-                                )
-                                if (showTime) {
-                                    Text(
-                                        hm(e.st) + " – " + (if (e.s.end == null) "进行中" else hm(e.en)) + " · " + fmtMin(e.en - e.st),
-                                        fontSize = 10.sp, color = C.ink.copy(alpha = 0.6f), maxLines = 1
-                                    )
-                                }
-                                if (noteLines > 0) {
-                                    Text(e.s.note, fontSize = 11.sp, color = C.ink.copy(alpha = 0.8f), maxLines = noteLines)
-                                }
-                                // 照片：统一小尺寸、圆角，排在文字下面，不压住文字
-                                if (showPhotos) {
-                                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        e.s.photos.take(3).forEach { p ->
-                                            AsyncImage(
-                                                File(p), null,
-                                                Modifier.size(photoH).clip(RoundedCornerShape(8.dp)),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    EventCard(e, bh, pos, onClick = { onOpen(e.s.id) }, onLong = { actionEv = e })
                 }
             }
         }
@@ -399,6 +361,74 @@ fun DayView(date: LocalDate, onOpen: (String) -> Unit, onEditTask: (String) -> U
     }
     editSession?.let { s ->
         EditSessionDialog(s, { editSession = null }) { ns -> Repo.updateSession(ns.id) { ns }; editSession = null }
+    }
+}
+
+/**
+ * 时间段色块（完全参照参考图）：圆角浅色卡片 + 里面一根缩进的圆头竖条（不贴边）；
+ * 从上到下依次是：照片（小圆角方块）→ 图标和名称 → 小钟表 + 时间范围 · 时长 → 录音条 → 文字。
+ * 即时记录不显示名称，直接显示内容。高度不够的内容往后丢，不会互相压住。
+ */
+@Composable
+private fun EventCard(e: Ev, bh: Dp, modifier: Modifier, onClick: () -> Unit, onLong: () -> Unit) {
+    val col = pcol(e.tag.color)
+    val s = e.s
+    val moment = e.tag.id == "x_note"
+    val compact = bh < 40.dp
+    val pad = if (compact) 3.dp else 6.dp
+    var room = bh - pad * 2
+    val showPh = s.photos.isNotEmpty() && room >= 40.dp
+    if (showPh) room -= 42.dp
+    val showTitle = !moment && room >= 16.dp
+    if (showTitle) room -= 18.dp
+    val showTime = !moment && !compact && room >= 14.dp
+    if (showTime) room -= 16.dp
+    val showAudio = s.audio.isNotBlank() && room >= 34.dp
+    if (showAudio) room -= 38.dp
+    val noteLines = if (s.note.isNotBlank()) (room / 15.dp).toInt().coerceIn(0, 6) else 0
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        modifier.clip(shape).background(col.copy(alpha = 0.20f)).border(1.dp, col.copy(alpha = 0.22f), shape)
+            .combinedClickable(onClick = onClick, onLongClick = onLong)
+    ) {
+        Row(Modifier.fillMaxSize().padding(start = 6.dp, end = 8.dp, top = pad, bottom = pad)) {
+            Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(col))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                if (showPh) {
+                    Row(Modifier.padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        s.photos.take(3).forEach { p ->
+                            AsyncImage(File(p), null, Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                        }
+                    }
+                }
+                if (showTitle) {
+                    Text(
+                        e.emoji + " " + e.name + (if (compact) " · " + fmtMin(e.en - e.st) else ""),
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = C.ink, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+                if (showTime) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ClockGlyph(11.dp, C.ink.copy(alpha = 0.55f))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            hm(e.st) + " - " + (if (s.end == null) "进行中" else hm(e.en)) + " · " + fmtMin(e.en - e.st),
+                            fontSize = 11.sp, color = C.ink.copy(alpha = 0.6f), maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (showAudio) AudioWave(s.audio, C.ink, Modifier.padding(vertical = 2.dp))
+                if (noteLines > 0) {
+                    Text(
+                        s.note, fontSize = 12.sp, color = C.ink.copy(alpha = 0.75f), maxLines = noteLines,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -489,7 +519,7 @@ fun SessionSheet(id: String, onClose: () -> Unit) {
                 Spacer(Modifier.width(6.dp))
                 Text((tag?.group ?: "") + (if (s.auto) " · 自动" else " · 手动"), color = C.gray)
             }
-            if (s.audio.isNotBlank()) AudioPlayRow(s.audio)
+            if (s.audio.isNotBlank()) AudioWave(s.audio, C.ink, Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF2F2F0)).padding(10.dp))
             OutlinedTextField(
                 note, { note = it; Repo.updateSession(id) { x -> x.copy(note = it) } },
                 label = { Text("所思所感") }, minLines = 3, modifier = Modifier.fillMaxWidth()
@@ -573,35 +603,6 @@ fun MonthGrid(date: LocalDate, onPick: (LocalDate) -> Unit) {
     }
 }
 
-
-/** 录音回放：▶ / ⏹ */
-@Composable
-fun AudioPlayRow(path: String) {
-    var player by remember(path) { mutableStateOf<MediaPlayer?>(null) }
-    DisposableEffect(path) { onDispose { try { player?.release() } catch (_: Exception) {} } }
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF2F2F0)).padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text("🎙 录音", Modifier.weight(1f), color = C.ink)
-        RippleButton(if (player != null) "⏹ 停止" else "▶ 播放", {
-            val cur = player
-            if (cur != null) {
-                try { cur.release() } catch (_: Exception) {}
-                player = null
-            } else {
-                try {
-                    val mp = MediaPlayer()
-                    mp.setDataSource(path)
-                    mp.prepare()
-                    mp.setOnCompletionListener { try { it.release() } catch (_: Exception) {}; player = null }
-                    mp.start()
-                    player = mp
-                } catch (_: Exception) {}
-            }
-        })
-    }
-}
 
 // ============================ 每日日记：导入 iPad 导出的 JPG / PDF ============================
 @Composable

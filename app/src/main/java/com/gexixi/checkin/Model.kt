@@ -75,7 +75,28 @@ data class Wish(
 
 data class FlowerLog(val ts: Long = 0L, val n: Int = 0, val taskId: String = "")
 data class AutoMap(val pkg: String = "", val tagId: String = "")
-data class Diary(val date: String = "", val files: List<String> = emptyList(), val text: String = "")
+data class Diary(
+    val date: String = "", val files: List<String> = emptyList(),
+    val text: String = "",        // AI 帮忙整理的日记正文（也可以自己改）
+    val review: String = ""       // AI 的点评（感恩日记风格）
+)
+
+// ---------- 朋友圈：自己加的角色、动态、点赞评论 ----------
+data class Friend(
+    val id: String = uid(), val name: String = "", val emoji: String = "🙂", val avatar: String = "",
+    val relation: String = "",    // 和你的关系，比如「大学室友」「妈妈」
+    val persona: String = ""      // 人设：性格、说话方式、爱好
+)
+
+/** 评论。author 是 "me" 或好友 id；to 是在回复谁（空 = 直接评论动态） */
+data class MComment(val id: String = uid(), val author: String = "", val text: String = "", val ts: Long = 0L, val to: String = "")
+
+/** 一条朋友圈动态。author 是 "me" 或好友 id；好友的动态只有文字 */
+data class Post(
+    val id: String = uid(), val author: String = "me", val text: String = "",
+    val photos: List<String> = emptyList(), val ts: Long = 0L,
+    val likes: List<String> = emptyList(), val comments: List<MComment> = emptyList()
+)
 data class NotionLink(val key: String = "", val name: String = "", val emoji: String = "", val url: String = "")
 
 data class Prefs(
@@ -233,6 +254,8 @@ data class Data(
     val sumOffset: Int = 0,
     val weather: Map<String, String> = emptyMap(),   // 日期 → 天气 emoji（手动选）
     val groups: List<GroupDef> = defaultGroups(),
+    val friends: List<Friend> = emptyList(),
+    val posts: List<Post> = emptyList(),
     val stopwatchStart: Long = 0L,                   // 番茄钟（专注计时）开始时间，0 = 没在计时
     val charPhotos: Map<String, String> = emptyMap(),// 人物界面里换的照片
     val charPlays: Map<String, Int> = emptyMap(),    // 每个角色的鼓励音频播放次数（♥ 数）

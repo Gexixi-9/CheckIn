@@ -54,7 +54,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -90,7 +93,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     val ctx = LocalContext.current
-    val pager = rememberPagerState(initialPage = 1, pageCount = { 3 })      // 0 记录  1 规划（默认）  2 人物（在规划右边）
+    val pager = rememberPagerState(initialPage = 1, pageCount = { 3 })      // 0 人物（在规划右滑出来）  1 规划（默认）  2 记录（在规划左滑出来）
     val scope = rememberCoroutineScope()
     var settings by remember { mutableStateOf(false) }
     var cel by remember { mutableStateOf<Cel?>(null) }
@@ -112,18 +115,18 @@ fun App() {
             Box(Modifier.fillMaxSize().background(C.paper).trackPointer(pointer)) {
                 HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !settings) { page ->
                     when (page) {
-                        0 -> RecordPage(onSettings = { settings = true })
+                        0 -> PeoplePage()
                         1 -> PlanPage(onSettings = { settings = true })
-                        else -> PeoplePage()
+                        else -> RecordPage(onSettings = { settings = true })
                     }
                 }
                 if (settings) SettingsPage(onBack = { settings = false })
                 // 悬浮的深色玻璃底栏：盖在内容上面，展开的卡片会再盖住它
                 GlassBar(
-                    pager.currentPage + pager.currentPageOffsetFraction, !settings,
+                    pager.currentPage + pager.currentPageOffsetFraction - 1f, !settings,
                     { i ->
                         settings = false
-                        scope.launch { pager.animateScrollToPage(i, 0f, spring(dampingRatio = 0.72f, stiffness = 260f)) }
+                        scope.launch { pager.animateScrollToPage(i + 1, 0f, spring(dampingRatio = 0.72f, stiffness = 260f)) }
                     },
                     Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 14.dp)
                 )
@@ -142,41 +145,65 @@ fun App() {
 }
 
 /**
- * 悬浮深色玻璃底栏：半透明深灰胶囊，里面两个入口（记录 / 规划），人物页在规划右边、不占底栏。
- * 选中的浅灰块用弹簧滑过去（带一点过冲和拉伸），也会跟着左右滑页面实时移动；图标和文字挨得很近。
+ * 悬浮白色「液态玻璃」底栏（仿苹果）：半透明浅白 + 顶部高光 + 一圈亮边 + 极淡的外轮廓和柔影。
+ * 底栏两个入口：规划 / 记录；人物页在规划右滑出来，不占底栏。
+ * 选中的浅灰块用弹簧滑过去（带一点过冲和拉伸），也会跟着左右滑页实时移动；图标和文字挨得很近。
+ * pos：0 = 规划，1 = 记录，负数 = 在人物页（浅灰块淡出）。
  */
 @Composable
 fun GlassBar(pos: Float, show: Boolean, onPick: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val itemW = 92.dp
+    val itemW = 88.dp
     val idx by animateFloatAsState(pos.coerceIn(0f, 1f), springF(380f, 20f), label = "barIdx")
-    val vis by animateFloatAsState(if (show) (2f - pos).coerceIn(0f, 1f) else 0f, tween(200), label = "barVis")
+    val vis by animateFloatAsState(if (show) (pos + 1f).coerceIn(0f, 1f) else 0f, tween(200), label = "barVis")
     val mid = (4f * idx * (1f - idx)).coerceIn(0f, 1f)
     val shape = RoundedCornerShape(32.dp)
     Box(
-        modifier
-            .clip(shape)
-            .background(Brush.verticalGradient(listOf(Color(0xD92E2E33), Color(0xBF1F1F23))))
-            .border(1.dp, Color(0x40FFFFFF), shape)
-            .padding(5.dp)
+        modifier.drawBehind {
+            // 柔和的外阴影：几层越来越大、越来越淡的圆角矩形
+            val cr = CornerRadius(32.dp.toPx())
+            listOf(2.dp to 0.05f, 5.dp to 0.035f, 9.dp to 0.02f).forEach { (g, a) ->
+                val gp = g.toPx()
+                drawRoundRect(
+                    Color.Black.copy(alpha = a), Offset(-gp, -gp + 3.dp.toPx()),
+                    Size(this.size.width + gp * 2, this.size.height + gp * 2), CornerRadius(cr.x + gp)
+                )
+            }
+        }
     ) {
         Box(
             Modifier
-                .offset { IntOffset((idx * itemW.toPx()).roundToInt(), 0) }
-                .size(itemW, 48.dp)
-                .graphicsLayer { alpha = vis; scaleX = 1f + 0.22f * mid }
-                .clip(RoundedCornerShape(26.dp))
-                .background(Color(0x40FFFFFF))
-        )
-        Row {
-            listOf("记录", "规划").forEachIndexed { i, n ->
-                Column(
-                    Modifier.size(itemW, 48.dp).bounceClick { onPick(i) },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    BarIcon(i)
-                    Spacer(Modifier.height(2.dp))
-                    Text(n, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                .clip(shape)
+                .background(Brush.verticalGradient(listOf(Color(0xE6FFFFFF), Color(0xB3EEF2F8))))
+                .border(1.dp, Color(0x14000000), shape)
+                .padding(1.dp)
+                .border(1.dp, Brush.linearGradient(listOf(Color(0xFFFFFFFF), Color(0x66FFFFFF), Color(0xE6FFFFFF))), RoundedCornerShape(31.dp))
+                .padding(4.dp)
+        ) {
+            // 顶部高光
+            Box(
+                Modifier.align(Alignment.TopCenter).padding(horizontal = 14.dp).fillMaxWidth().height(14.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Brush.verticalGradient(listOf(Color(0x99FFFFFF), Color.Transparent)))
+            )
+            Box(
+                Modifier
+                    .offset { IntOffset((idx * itemW.toPx()).roundToInt(), 0) }
+                    .size(itemW, 46.dp)
+                    .graphicsLayer { alpha = vis; scaleX = 1f + 0.22f * mid }
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Color(0x14000000))
+                    .border(1.dp, Color(0x99FFFFFF), RoundedCornerShape(26.dp))
+            )
+            Row {
+                listOf("规划", "记录").forEachIndexed { i, n ->
+                    Column(
+                        Modifier.size(itemW, 46.dp).bounceClick { onPick(i) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        BarIcon(if (i == 0) 1 else 0)
+                        Text(n, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, color = C.ink)
+                    }
                 }
             }
         }
@@ -188,14 +215,13 @@ fun GlassBar(pos: Float, show: Boolean, onPick: (Int) -> Unit, modifier: Modifie
 private fun BarIcon(kind: Int) {
     Canvas(Modifier.size(20.dp)) {
         val w = this.size.width
-        val dark = Color(0xFF2E2E33)
         if (kind == 0) {
-            drawCircle(Color.White, w / 2f)
-            drawLine(dark, Offset(w / 2f, w / 2f), Offset(w / 2f, w * 0.22f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
-            drawLine(dark, Offset(w / 2f, w / 2f), Offset(w * 0.72f, w * 0.62f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+            drawCircle(C.ink, w / 2f)
+            drawLine(Color.White, Offset(w / 2f, w / 2f), Offset(w / 2f, w * 0.22f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+            drawLine(Color.White, Offset(w / 2f, w / 2f), Offset(w * 0.72f, w * 0.62f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
         } else {
-            drawCircle(Color.White, w / 2f - w * 0.06f, style = Stroke(w * 0.12f))
-            drawCircle(Color.White, w * 0.2f)
+            drawCircle(C.ink, w / 2f - w * 0.06f, style = Stroke(w * 0.12f))
+            drawCircle(C.ink, w * 0.2f)
         }
     }
 }
